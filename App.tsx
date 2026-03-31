@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { AuthProvider, useAuth } from './AuthContext';
+import LoginPage from './components/LoginPage';
 import { DataProvider } from './DataContext';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
@@ -102,45 +104,34 @@ const MOCK_TEAM: TeamMember[] = [
 
 type ViewType = 'board' | 'dashboard' | 'equity' | 'facility' | 'support' | 'birthplan' | 'hedis' | 'careforce' | 'stratification' | 'environment-sdoh' | 'roi' | 'quality-scorecard' | 'clinical-diagnostics' | 'messaging' | 'system-pulse' | 'tower-config' | 'high-urgency-feed' | 'clinical-board' | 'admin-dashboard' | 'user-management' | 'supervisor-dashboard';
 
-function App() {
+function AppInner() {
+  const { isLoading, isAuthenticated, session, logout } = useAuth();
   const palette = dashboardTheme;
   const [boardGroups, setBoardGroups] = useState<BoardGroup[]>([]);
   const [selectedItem, setSelectedItem] = useState<BoardItem | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  
+
   // THREE PILLARS
   const [activePillar, setActivePillar] = useState<PillarType>('mco');
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
-  
+
   const [appStatus, setAppStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [searchedMember, setSearchedMember] = useState<BoardItem | null>(null);
 
-  // Session Management
-  const [currentSession, setCurrentSession] = useState<UserSession>({
-    user: MOCK_TEAM[3], // Start with Admin user
-    isAuthenticated: true,
+  // Derive currentSession from real auth
+  const currentSession: UserSession = session ?? {
+    user: MOCK_TEAM[3],
+    isAuthenticated: false,
     sessionStart: new Date(),
     lastActivity: new Date(),
-    accessLevel: 'admin'
-  });
-
-  const handleSessionChange = (user: TeamMember) => {
-    const accessLevel = user.role === 'Admin' ? 'admin' : 
-                       user.role === 'State Lead MCO Supervisor' ? 'supervisor' : 'user';
-    
-    setCurrentSession({
-      user,
-      isAuthenticated: true,
-      sessionStart: new Date(),
-      lastActivity: new Date(),
-      accessLevel: accessLevel as 'admin' | 'supervisor' | 'user'
-    });
+    accessLevel: 'user',
   };
 
   const allMembers = useMemo(() => boardGroups.flatMap(g => g.items), [boardGroups]);
 
-  // load data from CSV-backed API on mount
+  // load data from CSV-backed API on mount — all hooks must be before early returns
   useEffect(() => {
+    if (!isAuthenticated) return;
     let cancelled = false;
     async function load() {
       try {
@@ -153,18 +144,30 @@ function App() {
         }
       } catch (e) {
         console.error('[App] failed to load board groups', e);
-        if (!cancelled) {
-          setTimeout(load, 5000);
-        }
+        if (!cancelled) setTimeout(load, 5000);
       }
     }
-    load(); // load immediately on mount
+    load();
     const interval = setInterval(load, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isAuthenticated]);
+
+  // Show loading spinner while checking stored token
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Show login page if not authenticated
+  if (!isAuthenticated) return <LoginPage />;
+
+  const handleSessionChange = (user: TeamMember) => {
+    // Session changes are now driven by auth; keep for Header compatibility
+    void user;
+  };
 
   // Pillar Change Logic
   const handlePillarChange = (pillar: PillarType) => {
@@ -309,7 +312,7 @@ function App() {
         className="flex h-screen font-sans text-slate-900 overflow-hidden"
         style={{ background: 'linear-gradient(165deg, #eef3ef 0%, #e6efe8 48%, #e9f3ef 100%)' }}
       >
-        <Sidebar 
+        <Sidebar
           activePillar={activePillar}
           currentView={currentView}
           onViewChange={setCurrentView}
@@ -317,13 +320,14 @@ function App() {
           currentSession={currentSession}
         />
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-           <Header 
+           <Header
               activePillar={activePillar}
               onPillarChange={handlePillarChange}
               onSearch={handleSearch}
               currentSession={currentSession}
               onSessionChange={handleSessionChange}
               availableUsers={MOCK_TEAM}
+              onLogout={logout}
            />
            
            <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -342,6 +346,14 @@ function App() {
         )}
       </div>
     </DataProvider>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
   );
 }
 

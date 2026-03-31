@@ -2,26 +2,42 @@
 import React, { useState, useEffect } from 'react';
 import { AnalysisResult, TeamMember, Task, ChatMessage } from '../types';
 import { Users, Send, CheckSquare, Clock, ArrowRight, Zap, MoreHorizontal, Plus } from 'lucide-react';
+import { useAuth } from '../AuthContext';
 
 interface CollaborationPanelProps {
   result: AnalysisResult;
 }
 
-const MOCK_TEAM: TeamMember[] = [
-  { id: '1', name: 'Dr. Sarah Chen', role: 'OB/GYN Attending', initials: 'SC', color: 'bg-teal-600' },
-  { id: '2', name: 'Mark Davis', role: 'Charge Nurse', initials: 'MD', color: 'bg-stone-600' },
-  { id: '3', name: 'Residency Team', role: 'Rotating', initials: 'RT', color: 'bg-amber-600' },
-];
-
 const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
+  const { token } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
   const managementPlan = Array.isArray(result?.managementPlan) ? result.managementPlan : [];
   const safetyChecklist = Array.isArray(result?.safetyChecklist) ? result.safetyChecklist : [];
 
-  // Initialize Board and Chat based on AI Results (Simulating Automation)
+  useEffect(() => {
+    if (!token) return;
+
+    fetch('/api/careforce', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const members = Array.isArray(d?.members) ? d.members : [];
+        const mapped: TeamMember[] = members.slice(0, 6).map((m: any, idx: number) => ({
+          id: String(m.id ?? `member-${idx}`),
+          name: m.name ?? `Member ${idx + 1}`,
+          role: (m.role ?? 'Care Navigator') as TeamMember['role'],
+          initials: m.initials ?? 'NA',
+          color: m.color ?? 'bg-teal-600',
+        }));
+        setTeamMembers(mapped);
+      })
+      .catch(err => console.error('CollaborationPanel careforce fetch error:', err));
+  }, [token]);
+
+  // Initialize Board and Chat based on AI Results
   useEffect(() => {
     // 1. Transform Management Plan into Kanban Tasks
     const initialTasks: Task[] = managementPlan.map((plan, idx) => ({
@@ -30,7 +46,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
       category: plan.timing,
       status: idx === 0 ? 'in-progress' : 'todo', // Auto-start the first high priority item
       priority: plan.timing === 'immediate' ? 'high' : plan.timing === 'urgent' ? 'medium' : 'low',
-      assignee: plan.timing === 'immediate' ? MOCK_TEAM[0] : undefined
+      assignee: plan.timing === 'immediate' ? teamMembers[0] : undefined
     }));
     setTasks(initialTasks);
 
@@ -58,7 +74,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
       });
     }
     setMessages(systemMessages);
-  }, [managementPlan, safetyChecklist]);
+  }, [managementPlan, safetyChecklist, teamMembers]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +82,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
     
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
-      senderId: '1', // Acting as Dr. Chen
+      senderId: 'current-user',
       text: inputText,
       timestamp: 'Just now',
       type: 'message'
@@ -99,7 +115,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
             <p className="text-xs text-slate-500">Drag and drop to manage workflow</p>
           </div>
           <div className="flex -space-x-2">
-            {MOCK_TEAM.map(member => (
+            {teamMembers.map(member => (
               <div key={member.id} className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs font-bold text-white ${member.color}`} title={member.name}>
                 {member.initials}
               </div>
@@ -208,7 +224,9 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
               <Users className="w-5 h-5 text-teal-600" />
               Team Huddle
             </h3>
-            <p className="text-xs text-slate-500">Active: Dr. Chen, Mark (RN)</p>
+            <p className="text-xs text-slate-500">
+              Active: {teamMembers.length ? teamMembers.slice(0, 2).map(m => m.name).join(', ') : 'No team loaded'}
+            </p>
            </div>
            <MoreHorizontal className="w-5 h-5 text-slate-400" />
         </div>
@@ -229,11 +247,11 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ result }) => {
               </div>
 
               {/* Bubble */}
-              <div className={`flex flex-col max-w-[85%] ${msg.senderId === '1' ? 'items-end ml-auto' : 'items-start'}`}>
+                <div className={`flex flex-col max-w-[85%] ${msg.senderId === 'current-user' ? 'items-end ml-auto' : 'items-start'}`}>
                  <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed shadow-sm
                     ${msg.type === 'alert' ? 'bg-rose-50 border border-rose-100 text-rose-800' : 
                       msg.type === 'automation' ? 'bg-teal-50 border border-teal-100 text-teal-800 italic' :
-                      msg.senderId === '1' ? 'bg-teal-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
+                     msg.senderId === 'current-user' ? 'bg-teal-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
                     }`}>
                     {msg.text}
                  </div>

@@ -45,14 +45,15 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
 
   return (
     <aside className="w-[64px] md:w-[260px] h-screen text-slate-800 flex flex-col flex-shrink-0 transition-all duration-300 border-r z-50" style={{ background: 'linear-gradient(180deg, #f7fbf9, #edf4f0)', borderColor: '#c8d7cf' }}>
-      {/* Top Logo Area */}
-        <div className="h-[72px] flex items-center justify-center md:justify-start md:px-5 border-b shrink-0" style={{ borderColor: '#c8d7cf', background: 'linear-gradient(180deg, #eef5f1, #e7f0ec)' }}>
-        <div className="w-9 h-9 rounded-xl flex md:hidden items-center justify-center text-white font-black text-lg shadow-xl" style={{ background: `linear-gradient(135deg, ${palette.teal}, ${palette.gold})` }}>
-          N
-        </div>
-        <div className="hidden md:flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-lg shadow-xl shrink-0" style={{ background: `linear-gradient(135deg, ${palette.teal}, ${palette.gold})` }}>N</div>
-          <div>
+      {/* Top Brand Area */}
+      <div className="h-[72px] flex items-center justify-center md:justify-start md:px-5 border-b shrink-0" style={{ borderColor: '#c8d7cf', background: 'linear-gradient(180deg, #eef5f1, #e7f0ec)' }}>
+        <div className="flex items-center gap-3">
+          <img
+            src="/nyota-logo.svg"
+            alt="Nyota Health"
+            className="h-8 w-8 md:h-9 md:w-9 object-contain"
+          />
+          <div className="hidden md:block">
             <div className="text-[13px] font-black tracking-tight leading-none" style={{ color: '#1f2f2a' }}>Nyota Health</div>
             <div className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: '#d9b07c' }}>Command Tower</div>
           </div>
@@ -347,7 +348,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, count, onClick, 
         >{label}</span>
         {count && (
           <span className="hidden md:flex text-white text-[9px] font-black px-1.5 h-4 rounded-full items-center justify-center shrink-0"
-            style={{ backgroundColor: palette.critical }}>
+            style={{ backgroundColor: '#b91c1c' }}>
             {count}
           </span>
         )}

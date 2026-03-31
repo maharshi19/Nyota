@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useData } from '../DataContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, LineChart, Line } from 'recharts';
 import { AlertCircle, CheckCircle, AlertTriangle, TrendingUp, X, Send, Phone, Clock, Heart } from 'lucide-react';
 import RiskTrajectory from './RiskTrajectory';
@@ -50,6 +51,7 @@ interface PatientPrediction {
 }
 
 const ClinicalDiagnosticsView: React.FC = () => {
+  const { items } = useData();
   const [modelInfo, setModelInfo] = useState<MLModelInfo | null>(null);
   const [featureImportance, setFeatureImportance] = useState<FeatureImportance[]>([]);
   const [predictions, setPredictions] = useState<PatientPrediction[]>([]);
@@ -58,6 +60,16 @@ const ClinicalDiagnosticsView: React.FC = () => {
   const [alerts, setAlerts] = useState<Array<{ id: string; type: string; message: string; timestamp: Date }>>([]);
 
   useEffect(() => {
+    const parseSbp = (vitals: string): number => {
+      const match = /BP\s*(\d{2,3})\/(\d{2,3})/i.exec(vitals || '');
+      return match ? Number(match[1]) : 120;
+    };
+
+    const parseDbp = (vitals: string): number => {
+      const match = /BP\s*(\d{2,3})\/(\d{2,3})/i.exec(vitals || '');
+      return match ? Number(match[2]) : 80;
+    };
+
     const loadData = async () => {
       try {
         const [modelRes, featuresRes] = await Promise.all([
@@ -75,39 +87,25 @@ const ClinicalDiagnosticsView: React.FC = () => {
           setFeatureImportance(featuresData.features.slice(0, 8));
         }
 
-        // Generate sample predictions for display
-        const samplePatients = [
-          {
-            id: 'p-001',
-            name: 'Maria Santos',
-            mrn: 'MRN-1001',
-            age: 28,
-            sbp: 158,
-            dbp: 94,
-            map: 115,
-            heat_island_index: 85
-          },
-          {
-            id: 'p-002',
-            name: 'Jessica Chen',
-            mrn: 'MRN-1002',
-            age: 32,
-            sbp: 142,
-            dbp: 88,
-            map: 106,
-            heat_island_index: 72
-          },
-          {
-            id: 'p-003',
-            name: 'Angela Thompson',
-            mrn: 'MRN-1003',
-            age: 25,
-            sbp: 125,
-            dbp: 82,
-            map: 96,
-            heat_island_index: 65
-          }
-        ];
+        // Build patient cohort from real board data (highest risk first)
+        const samplePatients = items
+          .slice()
+          .sort((a, b) => (b.riskRank || 0) - (a.riskRank || 0))
+          .slice(0, 6)
+          .map((item, idx) => {
+            const sbp = parseSbp(item.lastVitals);
+            const dbp = parseDbp(item.lastVitals);
+            return {
+              id: item.id || `p-${idx + 1}`,
+              name: item.name,
+              mrn: item.mrn,
+              age: Number(item.caseData?.age) || 28,
+              sbp,
+              dbp,
+              map: Math.round((sbp + 2 * dbp) / 3),
+              heat_island_index: item.caseData?.environmental?.isHeatIsland ? 85 : 65,
+            };
+          });
 
         // Generate predictions for each sample patient
         const samplePredictions: PatientPrediction[] = await Promise.all(
@@ -156,7 +154,7 @@ const ClinicalDiagnosticsView: React.FC = () => {
     };
 
     loadData();
-  }, []);
+  }, [items]);
 
   const getRiskColor = (tier: string) => {
     switch(tier) {
@@ -294,19 +292,30 @@ const ClinicalDiagnosticsView: React.FC = () => {
     );
   };
   // Prepare chart data
+  const avgConfidence = predictions.length
+    ? predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length
+    : 0;
+
   const performanceData = modelInfo ? [
-    { name: 'AUC-PR', value: modelInfo.metrics.test.ap * 100, target: 24.38 },
-    { name: 'AUC-ROC', value: modelInfo.metrics.test.auc * 100, target: 65.13 },
-    { name: 'Precision', value: 78.5, target: 75 },
-    { name: 'Recall', value: 82.3, target: 80 }
+    { name: 'AUC-PR', value: modelInfo.metrics.test.ap * 100, target: modelInfo.metrics.validation.ap * 100 },
+    { name: 'AUC-ROC', value: modelInfo.metrics.test.auc * 100, target: modelInfo.metrics.validation.auc * 100 },
+    { name: 'Calibration', value: Math.max(0, 100 - modelInfo.metrics.test.brier * 100), target: Math.max(0, 100 - modelInfo.metrics.validation.brier * 100) },
+    { name: 'Confidence', value: avgConfidence * 100, target: 80 }
   ] : [];
 
+  const riskCounts = {
+    low: predictions.filter(p => p.riskTier === 'Low').length,
+    medium: predictions.filter(p => p.riskTier === 'Medium').length,
+    high: predictions.filter(p => p.riskTier === 'High').length,
+    critical: predictions.filter(p => p.riskTier === 'Critical').length,
+  };
+
   const riskDistributionData = [
-    { name: 'Low Risk', value: 65, color: '#10b981' },
-    { name: 'Medium Risk', value: 25, color: '#f59e0b' },
-    { name: 'High Risk', value: 8, color: '#ef4444' },
-    { name: 'Critical Risk', value: 2, color: '#7c2d12' }
-  ];
+    { name: 'Low Risk', value: riskCounts.low, color: '#10b981' },
+    { name: 'Medium Risk', value: riskCounts.medium, color: '#f59e0b' },
+    { name: 'High Risk', value: riskCounts.high, color: '#ef4444' },
+    { name: 'Critical Risk', value: riskCounts.critical, color: '#7c2d12' }
+  ].filter(r => r.value > 0);
 
   const featureRadarData = featureImportance.map(feature => ({
     feature: feature.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
@@ -315,19 +324,25 @@ const ClinicalDiagnosticsView: React.FC = () => {
 
   const generateRiskTrajectoryData = (probability: number, sbp: number) => {
     const data = [];
-    const dates = ['Mar 1', 'Mar 2', 'Mar 3', 'Mar 4', 'Mar 5', 'Mar 6', 'Mar 7', 'Mar 8', 'Mar 9', 'Mar 10', 'Mar 11', 'Mar 12', 'Mar 13', 'Mar 14'];
-    let baseRisk = Math.max(10, probability - 15);
-    
-    for (let i = 0; i < dates.length; i++) {
-      const variation = Math.sin(i / 3) * 8;
-      const interventionImpact = i > 7 ? -5 : 0;
-      const riskScore = Math.max(5, Math.min(95, baseRisk + variation + interventionImpact + Math.random() * 5));
-      
+    const now = new Date();
+    const dayLabels = Array.from({ length: 14 }, (_, idx) => {
+      const d = new Date(now);
+      d.setDate(now.getDate() - (13 - idx));
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    });
+    const baseRisk = Math.max(10, probability - 12);
+
+    for (let i = 0; i < dayLabels.length; i++) {
+      const trend = i >= 8 ? -4 : 2;
+      const wave = Math.sin(i / 2.5) * 4;
+      const riskScore = Math.max(5, Math.min(95, Math.round(baseRisk + wave + trend)));
+      const vitalsPressure = Math.round(sbp - 6 + Math.sin(i / 2) * 3);
+
       data.push({
-        date: dates[i],
-        riskScore: Math.round(riskScore),
-        vitalsPressure: sbp - 10 + Math.random() * 15,
-        interventions: i === 7 ? ['Enhanced Monitoring', 'Care Team Alert'] : i === 10 ? ['Follow-up Call'] : []
+        date: dayLabels[i],
+        riskScore,
+        vitalsPressure,
+        interventions: i === 8 ? ['Enhanced Monitoring', 'Care Team Alert'] : i === 11 ? ['Follow-up Call'] : []
       });
     }
     return data;

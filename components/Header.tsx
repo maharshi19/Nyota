@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Globe, ChevronRight, Activity, LayoutGrid, BrainCircuit, Users, ChevronDown } from 'lucide-react';
+import { Search, Globe, ChevronRight, Activity, LayoutGrid, BrainCircuit, Users, ChevronDown, LogOut } from 'lucide-react';
 import { PillarType, UserSession, TeamMember } from '../types';
 import { dashboardTheme } from '../utils/dashboardTheme';
 
@@ -11,9 +11,10 @@ interface HeaderProps {
   currentSession?: UserSession;
   onSessionChange?: (user: TeamMember) => void;
   availableUsers?: TeamMember[];
+  onLogout?: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch, currentSession, onSessionChange, availableUsers }) => {
+const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch, currentSession, onSessionChange, availableUsers, onLogout }) => {
   const palette = dashboardTheme;
   const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -50,13 +51,6 @@ const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch,
   return (
     <header className="border-b h-[72px] flex items-center justify-between px-6 sticky top-0 z-40 shadow-sm" style={{ background: 'linear-gradient(180deg, #f8fbf9, #edf4f0)', borderColor: '#cfddd5' }}>
       <div className="flex items-center gap-5">
-        <div className="hidden md:flex items-center">
-          <img
-            src="/nyota-logo.svg"
-            alt="Nyota Health"
-            className="h-9 w-auto object-contain"
-          />
-        </div>
         <div className="flex flex-col">
           <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest leading-none mb-1" style={{ color: '#6c8a80' }}>
              <Globe className="w-3 h-3" />
@@ -65,7 +59,7 @@ const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch,
              <span>TMaH model</span>
           </div>
           <div className="flex items-center gap-3">
-             <h1 className="text-xl font-black tracking-tight" style={{ color: '#1f2f2a' }}>Command Tower</h1>
+             <h1 className="text-xl font-black tracking-tight" style={{ color: '#1f2f2a' }}>Nyota Health Command Tower</h1>
              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black border" style={{ backgroundColor: '#e6f3ef', color: '#2f8a74', borderColor: '#bed4cb' }}>
                <Activity className="w-3 h-3" />
                LIVE
@@ -167,6 +161,17 @@ const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch,
                     </button>
                   ))}
                 </div>
+                {onLogout && (
+                  <div className="border-t p-2" style={{ borderColor: '#c8d7cf' }}>
+                    <button
+                      onClick={() => { setShowUserMenu(false); onLogout(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign out
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

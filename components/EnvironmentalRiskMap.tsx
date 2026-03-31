@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MapPin, Thermometer, Wind, AlertCircle, ShoppingBasket, Bus, Zap, ShieldAlert, Users, HeartHandshake, Stethoscope, Building2, X, TrendingUp, Activity } from 'lucide-react';
+import { useData } from '../DataContext';
 
 interface EnvironmentalRiskMapProps {
   overlay?: 'clinical' | 'environmental' | 'resource' | null;
@@ -9,7 +10,7 @@ interface EnvironmentalRiskMapProps {
 interface ClusterData {
   id: number;
   zip: string;
-  risk: 'Critical' | 'Moderate';
+  risk: 'Critical' | 'High' | 'Moderate';
   stressors: string[];
   members: number;
   top: string;
@@ -48,99 +49,117 @@ interface ClusterData {
   };
 }
 
-const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay }) => {  const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);  // Enhanced GIS data focusing on Maternity Deserts and Community coverage
-  const allClusters = [
-    { 
-      id: 1, 
-      zip: '38722', 
-      risk: 'Critical', 
-      stressors: ['Maternity Desert', 'Heat Island', 'Transport Desert'], 
-      members: 18, 
-      top: '50%', 
-      left: '40%',
-      hasTransport: false,
-      hasFood: false,
-      hasMidwife: false,
-      hasDoula: false,
-      type: 'clinical',
-      clinicalData: { hypertension: 8, diabetes: 5, pretermRisk: 12, interventions: 3 }
-    },
-    { 
-      id: 2, 
-      zip: '38723', 
-      risk: 'High', 
-      stressors: ['Food Desert', 'CHW Dispatch Area'], 
-      members: 12, 
-      top: '30%', 
-      left: '70%',
-      hasTransport: true,
-      hasFood: true,
-      hasMidwife: true,
-      hasDoula: false,
-      type: 'resource',
-      resourceData: { foodAccess: 'Critical', transportAccess: 'Good', midwifeCoverage: 'Adequate', chws: 3 }
-    },
-    { 
-      id: 3, 
-      zip: '38721', 
-      risk: 'Moderate', 
-      stressors: ['Heat Wave', 'Doula Coverage Active'], 
-      members: 7, 
-      top: '65%', 
-      left: '25%',
-      hasTransport: true,
-      hasFood: false,
-      hasMidwife: false,
-      hasDoula: true,
-      type: 'environmental',
-      environmentalData: { aqi: 145, heatIndex: 105, maternityDesert: true, interventions: ['AC Support', 'Hydration Stations'] }
-    },
-    {
-      id: 4,
-      zip: '38724',
-      risk: 'High',
-      stressors: ['Multiple Gestations', 'Cardiac Conditions', 'Transport Limited'],
-      members: 15,
-      top: '20%',
-      left: '60%',
-      hasTransport: false,
-      hasFood: true,
-      hasMidwife: true,
-      hasDoula: true,
-      type: 'clinical',
-      clinicalData: { hypertension: 6, diabetes: 4, pretermRisk: 9, interventions: 5 }
-    },
-    {
-      id: 5,
-      zip: '38725',
-      risk: 'Critical',
-      stressors: ['Extreme Heat', 'Air Quality Alert', 'No Doula Coverage'],
-      members: 22,
-      top: '75%',
-      left: '80%',
-      hasTransport: true,
-      hasFood: false,
-      hasMidwife: false,
-      hasDoula: false,
-      type: 'environmental',
-      environmentalData: { aqi: 180, heatIndex: 115, maternityDesert: true, interventions: ['Emergency Cooling', 'Air Purifiers'] }
-    },
-    {
-      id: 6,
-      zip: '38726',
-      risk: 'Moderate',
-      stressors: ['Limited CHW Coverage', 'Food Insecurity', 'Transport Gaps'],
-      members: 9,
-      top: '45%',
-      left: '15%',
-      hasTransport: false,
-      hasFood: false,
-      hasMidwife: true,
-      hasDoula: false,
-      type: 'resource',
-      resourceData: { foodAccess: 'Poor', transportAccess: 'Limited', midwifeCoverage: 'Minimal', chws: 1 }
-    }
+const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay }) => {
+  const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);
+  const { items } = useData();
+
+  const positions = [
+    { top: '50%', left: '40%' },
+    { top: '30%', left: '70%' },
+    { top: '65%', left: '25%' },
+    { top: '20%', left: '60%' },
+    { top: '75%', left: '80%' },
+    { top: '45%', left: '15%' },
+    { top: '35%', left: '48%' },
+    { top: '62%', left: '62%' },
   ];
+
+  const allClusters = useMemo<ClusterData[]>(() => {
+    const byZip = new Map<string, typeof items>();
+
+    items.forEach((item) => {
+      const zip = item.caseData?.environmental?.zipCode || 'Unknown';
+      if (!byZip.has(zip)) byZip.set(zip, []);
+      byZip.get(zip)!.push(item);
+    });
+
+    return Array.from(byZip.entries()).slice(0, 8).map(([zip, zipItems], idx) => {
+      const members = zipItems.length;
+      const critical = zipItems.filter(i => i.status === 'Critical').length;
+      const reviewing = zipItems.filter(i => i.status === 'Reviewing').length;
+
+      const aqiValues = zipItems
+        .map(i => Number(i.caseData?.environmental?.airQuality))
+        .filter(n => Number.isFinite(n));
+      const heatValues = zipItems
+        .map(i => Number(i.caseData?.environmental?.heatIndex))
+        .filter(n => Number.isFinite(n));
+
+      const avgAqi = aqiValues.length ? Math.round(aqiValues.reduce((a, b) => a + b, 0) / aqiValues.length) : 0;
+      const avgHeat = heatValues.length ? Math.round(heatValues.reduce((a, b) => a + b, 0) / heatValues.length) : 0;
+
+      const foodDesertCount = zipItems.filter(i => i.caseData?.environmental?.foodDesertStatus).length;
+      const transportGapCount = zipItems.filter(i => i.caseData?.environmental?.transportationDesertStatus).length;
+
+      const hasMidwife = zipItems.some(i => i.caseData?.communityAccess?.midwifeAvailable);
+      const hasDoula = zipItems.some(i => i.caseData?.communityAccess?.doulaAvailable);
+      const hasTransport = transportGapCount === 0;
+      const hasFood = foodDesertCount === 0;
+
+      const stressors: string[] = [];
+      if (zipItems.some(i => i.caseData?.environmental?.maternityCareDesert)) stressors.push('Maternity Desert');
+      if (avgHeat > 100) stressors.push('Heat Island');
+      if (avgAqi > 100) stressors.push('Air Quality Alert');
+      if (!hasTransport) stressors.push('Transport Desert');
+      if (!hasFood) stressors.push('Food Desert');
+      if (!hasDoula) stressors.push('No Doula Coverage');
+      if (!hasMidwife) stressors.push('No Midwife Coverage');
+
+      const type: ClusterData['type'] = avgAqi > 100 || avgHeat > 100
+        ? 'environmental'
+        : (!hasFood || !hasTransport)
+          ? 'resource'
+          : 'clinical';
+
+      const risk: ClusterData['risk'] = critical >= 4
+        ? 'Critical'
+        : (critical >= 2 || reviewing >= 2)
+          ? 'High'
+          : 'Moderate';
+
+      return {
+        id: idx + 1,
+        zip,
+        risk,
+        stressors: stressors.length ? stressors : ['Stable Conditions'],
+        members,
+        top: positions[idx % positions.length].top,
+        left: positions[idx % positions.length].left,
+        hasTransport,
+        hasFood,
+        hasMidwife,
+        hasDoula,
+        type,
+        clinicalData: {
+          hypertension: zipItems.filter(i => i.caseData?.environmental?.isHeatIsland).length,
+          diabetes: zipItems.filter(i => i.caseData?.environmental?.foodDesertStatus).length,
+          avgRiskScore: members ? Math.round(zipItems.reduce((s, i) => s + (i.riskRank || 0), 0) / members) : 0,
+          interventionSuccess: members ? Math.max(0, 100 - Math.round((critical / members) * 100)) : 0,
+          chronicDiseasePrevalence: members ? Math.round((zipItems.filter(i => i.caseData?.environmental?.foodDesertStatus || i.caseData?.environmental?.isHeatIsland).length / members) * 100) : 0,
+          mentalHealthCases: reviewing,
+          preventiveCareAccess: members ? Math.round((zipItems.filter(i => i.ppcPre).length / members) * 100) : 0,
+        },
+        environmentalData: {
+          aqi: avgAqi,
+          heatIndex: avgHeat,
+          humidity: Math.min(95, 45 + Math.round(avgHeat * 0.2)),
+          pollutionLevel: avgAqi > 150 ? 'High' : avgAqi > 100 ? 'Moderate' : 'Low',
+          respiratoryCases: zipItems.filter(i => (i.nicuProbability || 0) >= 60).length,
+          heatRelatedIncidents: zipItems.filter(i => (i.caseData?.environmental?.heatIndex || 0) > 100).length,
+          interventions: stressors.filter(s => s !== 'Stable Conditions'),
+        },
+        resourceData: {
+          foodAccess: hasFood ? 'Good' : 'Limited',
+          transportAccess: hasTransport ? 'Good' : 'Limited',
+          healthcareFacilities: Math.max(1, Math.round(members / 4)),
+          communityCenters: Math.max(1, Math.round(members / 6)),
+          emergencyServices: hasTransport ? '12' : '25',
+          pharmacyAccess: hasFood ? '2.5' : '6.0',
+          socialServices: hasDoula || hasMidwife ? 'Available' : 'Limited',
+        },
+      };
+    });
+  }, [items]);
 
   // Filter clusters based on overlay
   const clusters = overlay ? allClusters.filter(c => c.type === overlay) : allClusters;

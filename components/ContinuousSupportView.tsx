@@ -1,6 +1,8 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BoardItem } from '../types';
+import { useAuth } from '../AuthContext';
+import { useData } from '../DataContext';
 import { 
   Users, 
   CalendarCheck, 
@@ -31,18 +33,96 @@ interface ContinuousSupportViewProps {
 }
 
 const ContinuousSupportView: React.FC<ContinuousSupportViewProps> = ({ selectedMember }) => {
-  // Collective Perspective Data
-  const aggregateMetrics = [
-    { name: 'Midwives', value: 42, color: '#10b981', target: 50 },
-    { name: 'Doulas', value: 38, color: '#ec4899', target: 60 },
-    { name: 'CHWs', value: 55, color: '#3a8c81', target: 50 },
-  ];
+  const { token } = useAuth();
+  const { items } = useData();
+  const [roleCounts, setRoleCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/careforce', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setRoleCounts(d.roleCounts || {}); })
+      .catch(err => console.error('ContinuousSupport careforce fetch:', err));
+  }, [token]);
+
+  const ROLE_META: Record<string, { color: string; target: number }> = {
+    Midwives: { color: '#10b981', target: 50 },
+    Doulas:   { color: '#ec4899', target: 60 },
+    CHWs:     { color: '#3a8c81', target: 50 },
+    Nurses:   { color: '#0d9488', target: 40 },
+    MDs:      { color: '#6366f1', target: 20 },
+  };
+
+  const aggregateMetrics = Object.entries(roleCounts).map(([name, value]) => ({
+    name,
+    value: value as number,
+    color: ROLE_META[name]?.color ?? '#94a3b8',
+    target: ROLE_META[name]?.target ?? Math.round((value as number) * 1.25),
+  }));
+
+  // Support advantage derived from board items
+  const withoutSupport = items.filter(i =>
+    !i.caseData?.communityAccess?.doulaAvailable &&
+    !i.caseData?.communityAccess?.midwifeAvailable &&
+    !i.caseData?.communityAccess?.chwAssigned
+  );
+  const criticalWithout = withoutSupport.length
+    ? Math.round(withoutSupport.filter(i => i.status === 'Critical').length / withoutSupport.length * 100)
+    : 0;
 
   const disparityReduction = [
-    { group: 'Black/AA', withSupport: 32, withoutSupport: 52 },
-    { group: 'Hispanic', withSupport: 24, withoutSupport: 38 },
-    { group: 'White', withSupport: 18, withoutSupport: 20 },
+    {
+      group: 'Doula Assigned',
+      withSupport: (() => {
+        const s = items.filter(i => i.caseData?.communityAccess?.doulaAvailable);
+        return s.length ? Math.round(s.filter(i => i.status === 'Critical').length / s.length * 100) : 0;
+      })(),
+      withoutSupport: criticalWithout,
+    },
+    {
+      group: 'CHW Assigned',
+      withSupport: (() => {
+        const s = items.filter(i => i.caseData?.communityAccess?.chwAssigned);
+        return s.length ? Math.round(s.filter(i => i.status === 'Critical').length / s.length * 100) : 0;
+      })(),
+      withoutSupport: criticalWithout,
+    },
+    {
+      group: 'Midwife Avail.',
+      withSupport: (() => {
+        const s = items.filter(i => i.caseData?.communityAccess?.midwifeAvailable);
+        return s.length ? Math.round(s.filter(i => i.status === 'Critical').length / s.length * 100) : 0;
+      })(),
+      withoutSupport: criticalWithout,
+    },
   ];
+
+  const criticalWithoutSupportByZip = withoutSupport
+    .filter(i => i.status === 'Critical')
+    .reduce<Record<string, number>>((acc, item) => {
+      const zip = item.caseData?.environmental?.zipCode || 'Unknown';
+      acc[zip] = (acc[zip] || 0) + 1;
+      return acc;
+    }, {});
+
+  const [priorityZip = 'N/A', priorityZipDeficit = 0] = Object.entries(criticalWithoutSupportByZip)
+    .sort((a, b) => b[1] - a[1])[0] || [];
+
+  const doulaCurrent = roleCounts.Doulas || 0;
+  const doulaTarget = ROLE_META.Doulas.target;
+  const doulaGrowthPct = doulaCurrent > 0
+    ? Math.max(0, Math.round(((doulaTarget - doulaCurrent) / doulaCurrent) * 100))
+    : 0;
+
+  const highRiskMembers = items.filter(i => i.status === 'Critical' || i.status === 'Reviewing');
+  const coveredHighRisk = highRiskMembers.filter(i =>
+    i.caseData?.communityAccess?.doulaAvailable ||
+    i.caseData?.communityAccess?.midwifeAvailable ||
+    i.caseData?.communityAccess?.chwAssigned
+  ).length;
+  const coverageGoalPct = highRiskMembers.length
+    ? Math.round((coveredHighRisk / highRiskMembers.length) * 100)
+    : 0;
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 p-6 md:p-8 space-y-8 custom-scrollbar">
@@ -185,13 +265,17 @@ const ContinuousSupportView: React.FC<ContinuousSupportViewProps> = ({ selectedM
                  </div>
 
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {disparityReduction.map((d, i) => (
+                    {disparityReduction.map((d, i) => {
+                      const ratio = d.withoutSupport > 0 ? d.withSupport / d.withoutSupport : 1;
+                      const reductionPct = Math.round((1 - ratio) * 100);
+                      const clipPct = Math.max(0, Math.min(100, 100 - ratio * 100));
+                      return (
                       <div key={i} className="flex flex-col items-center">
                         <div className="relative w-32 h-32 flex items-center justify-center mb-4">
                            <div className="absolute inset-0 rounded-full border-8 border-slate-50"></div>
-                           <div className="absolute inset-0 rounded-full border-8 border-teal-600" style={{ clipPath: `inset(0 0 ${100 - (d.withSupport/d.withoutSupport*100)}% 0)` }}></div>
+                           <div className="absolute inset-0 rounded-full border-8 border-teal-600" style={{ clipPath: `inset(0 0 ${clipPct}% 0)` }}></div>
                            <div className="flex flex-col items-center">
-                             <span className="text-xl font-black text-slate-900">-{Math.round((1 - d.withSupport/d.withoutSupport)*100)}%</span>
+                             <span className="text-xl font-black text-slate-900">{reductionPct >= 0 ? `-${reductionPct}%` : `+${Math.abs(reductionPct)}%`}</span>
                              <span className="text-[8px] font-bold text-slate-400 uppercase">SMM Risk</span>
                            </div>
                         </div>
@@ -200,7 +284,7 @@ const ContinuousSupportView: React.FC<ContinuousSupportViewProps> = ({ selectedM
                            <div className="text-[10px] text-slate-400 font-medium">With vs. Without Support</div>
                         </div>
                       </div>
-                    ))}
+                    )})}
                  </div>
               </div>
            </div>
@@ -212,15 +296,15 @@ const ContinuousSupportView: React.FC<ContinuousSupportViewProps> = ({ selectedM
                     <div className="flex gap-4">
                        <div className="p-2 bg-white/10 rounded-xl"><MapPin className="w-5 h-5 text-rose-400" /></div>
                        <div>
-                         <div className="text-xs font-black">Zip 38722: CHW Deficit</div>
-                         <div className="text-[10px] text-slate-400">14 high-risk members unmapped to CHW.</div>
+                         <div className="text-xs font-black">Zip {priorityZip}: CHW Deficit</div>
+                         <div className="text-[10px] text-slate-400">{priorityZipDeficit} high-risk members unmapped to CHW.</div>
                        </div>
                     </div>
                     <div className="flex gap-4">
                        <div className="p-2 bg-white/10 rounded-xl"><HeartHandshake className="w-5 h-5 text-teal-400" /></div>
                        <div>
                          <div className="text-xs font-black">Doula Network Expansion</div>
-                         <div className="text-[10px] text-slate-400">Targeting 15% capacity increase in Q4.</div>
+                         <div className="text-[10px] text-slate-400">Targeting {doulaGrowthPct}% capacity increase to hit network target.</div>
                        </div>
                     </div>
                  </div>
@@ -234,9 +318,9 @@ const ContinuousSupportView: React.FC<ContinuousSupportViewProps> = ({ selectedM
                     <Target className="w-5 h-5 text-teal-600" />
                     <h4 className="text-xs font-black text-teal-900 uppercase">TMaH Performance Goal</h4>
                  </div>
-                 <div className="text-2xl font-black text-slate-900 mb-2">90% Coverage</div>
+                 <div className="text-2xl font-black text-slate-900 mb-2">{coverageGoalPct}% Coverage</div>
                  <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                   State mandate: Ensure every high-risk Black/AA and Hispanic member is offered a continuous support navigator by Jan 2025.
+                   Live goal progress: {coveredHighRisk} of {highRiskMembers.length} high-risk members currently mapped to continuous support.
                  </p>
               </div>
            </div>
