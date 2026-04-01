@@ -27,6 +27,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+function getInternalApiBaseUrl() {
+  const port = Number(process.env.PORT) || 3009;
+  return `http://127.0.0.1:${port}`;
+}
+
 function bootstrapGeminiKey() {
   if (process.env.GEMINI_API_KEY) return;
 
@@ -523,7 +528,7 @@ function makeBoardGroups(rows) {
 app.get('/api/board', async (req, res) => {
   try {
     // Use aggregated data that includes both CSV and MCO submissions
-    const response = await fetch('http://localhost:3009/api/mco/aggregated-data');
+    const response = await fetch(`${getInternalApiBaseUrl()}/api/mco/aggregated-data`);
     const data = await response.json();
     res.json(data);
   } catch (err) {
@@ -1604,7 +1609,7 @@ app.delete('/api/users/:id', requireAuth(['admin']), (req, res) => {
   // GET /api/hedis – HEDIS metrics computed from board data (any authenticated user)
   app.get('/api/hedis', requireAuth([]), async (req, res) => {
     try {
-      const response = await fetch('http://localhost:3009/api/mco/aggregated-data');
+      const response = await fetch(`${getInternalApiBaseUrl()}/api/mco/aggregated-data`);
       if (!response.ok) throw new Error('Failed to fetch aggregated data');
       const data = await response.json();
       const items = (data.groups || []).flatMap(g => g.items);
