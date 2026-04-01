@@ -1,3 +1,5 @@
+@import 'leaflet/dist/leaflet.css';
+
 /* Base utility classes used by panel forms and scroll containers. */
 
 .input-label {

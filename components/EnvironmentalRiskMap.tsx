@@ -1,7 +1,9 @@
 
 import React, { useMemo, useState } from 'react';
-import { MapPin, Thermometer, Wind, AlertCircle, ShoppingBasket, Bus, Zap, ShieldAlert, Users, HeartHandshake, Stethoscope, Building2, X, TrendingUp, Activity } from 'lucide-react';
+import { MapPin, Thermometer, Wind, AlertCircle, ShoppingBasket, Bus, Zap, ShieldAlert, Users, HeartHandshake, Stethoscope, Building2, X, TrendingUp, Activity, Map as MapIcon, LayoutGrid } from 'lucide-react';
 import { useData } from '../DataContext';
+import ClusterMap from './ClusterMap';
+import { Suspense } from 'react';
 
 interface EnvironmentalRiskMapProps {
   overlay?: 'clinical' | 'environmental' | 'resource' | null;
@@ -51,6 +53,7 @@ interface ClusterData {
 
 const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay }) => {
   const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);
+  const [viewMode, setViewMode] = useState<'canvas' | 'map'>('canvas');
   const { items } = useData();
 
   const positions = [
@@ -305,6 +308,42 @@ const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay }) 
 
   return (
     <div className="bg-slate-50 rounded-3xl border border-slate-200 h-full w-full relative overflow-hidden shadow-xl">
+      {/* View Mode Toggle */}
+      <div className="absolute top-6 left-6 z-30 flex gap-2">
+        <button
+          onClick={() => setViewMode('map')}
+          className={`px-4 py-2 rounded-xl font-bold text-sm transition-all duration-200 flex items-center gap-2 ${
+            viewMode === 'map'
+              ? 'bg-teal-600 text-white shadow-lg'
+              : 'bg-white/95 text-slate-600 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <MapIcon className="w-4 h-4" />
+          Geographic Map
+        </button>
+        <button
+          onClick={() => setViewMode('canvas')}
+          className={`px-4 py-2 rounded-xl font-bold text-sm transition-all duration-200 flex items-center gap-2 ${
+            viewMode === 'canvas'
+              ? 'bg-teal-600 text-white shadow-lg'
+              : 'bg-white/95 text-slate-600 border border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          Canvas View
+        </button>
+      </div>
+
+      {/* Map View */}
+      {viewMode === 'map' && (
+        <Suspense fallback={<div className="w-full h-full flex items-center justify-center bg-slate-100">Loading map...</div>}>
+          <ClusterMap clusters={clusters} overlay={overlay} />
+        </Suspense>
+      )}
+
+      {/* Canvas View */}
+      {viewMode === 'canvas' && (
+      <div className="w-full h-full">
       {/* Map Header Overlay */}
       <div className="absolute top-6 right-6 z-20 flex flex-col gap-3">
         <div className="bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200 shadow-lg">
@@ -453,6 +492,8 @@ const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay }) 
           </div>
         </div>
       </div>
+      </div>
+      )}
     </div>
   );
 };
