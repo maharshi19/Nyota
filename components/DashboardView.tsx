@@ -21,6 +21,13 @@ interface DashboardViewProps {
 
 const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
   const palette = dashboardTheme;
+  const MAX_INTERVENTION_FEED_ITEMS = 250;
+
+  const hasClinicalSignal = (item: BoardItem) => {
+    const condition = String(item.smmCondition || '').trim().toLowerCase();
+    const hasMeaningfulCondition = condition.length > 0 && condition !== 'none' && condition !== 'unknown';
+    return Boolean(item.caseData?.hypertension || item.caseData?.diabetes || hasMeaningfulCondition);
+  };
 
   const allItems = useMemo(() => groups.flatMap(g => g.items), [groups]);
   const [mapOverlay, setMapOverlay] = useState<'clinical' | 'environmental' | 'resource'>('environmental');
@@ -30,11 +37,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
   const filteredItems = useMemo(() => {
     switch (mapOverlay) {
       case 'clinical':
-        return allItems.filter(item => 
-          item.caseData?.hypertension || 
-          item.caseData?.diabetes || 
-          item.smmCondition
-        );
+        return allItems.filter(hasClinicalSignal);
       case 'environmental':
         return allItems.filter(item => 
           item.caseData?.heatIslandIndex !== undefined || 
@@ -49,6 +52,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
         return allItems;
     }
   }, [allItems, mapOverlay]);
+
+  const interventionFeedItems = useMemo(
+    () => filteredItems
+      .filter(i => i.status === 'Critical' || i.status === 'Reviewing')
+      .slice(0, MAX_INTERVENTION_FEED_ITEMS),
+    [filteredItems]
+  );
+
+  const clinicalSignalCount = useMemo(
+    () => filteredItems.filter(hasClinicalSignal).length,
+    [filteredItems]
+  );
 
   // 1. EXECUTIVE PULSE CALCULATIONS
   const criticalFlags = filteredItems.filter(i => i.status === 'Critical').length;
@@ -181,8 +196,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
               </div>
                 <Filter className="w-4 h-4" style={{ color: palette.sage }} />
            </div>
-              <div className="flex-1 overflow-y-auto divide-y custom-scrollbar" style={{ borderColor: palette.sand }}>
-              {filteredItems.filter(i => i.status === 'Critical' || i.status === 'Reviewing').map(item => (
+            <div className="flex-1 overflow-y-auto divide-y custom-scrollbar" style={{ borderColor: palette.sand }}>
+            {interventionFeedItems.map(item => (
                  <InterventionCard key={item.id} item={item} palette={palette} />
               ))}
            </div>
@@ -235,7 +250,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
                     </div>
                     <p className="text-[10px] text-slate-600 leading-relaxed font-medium">
                       {filteredItems.filter(i => i.caseData?.hypertension).length} hypertension cases identified. 
-                      {filteredItems.filter(i => i.smmCondition).length} SMM risk factors active. 
+                      {clinicalSignalCount} SMM risk factors active. 
                       Intervention protocols engaged for high-risk clusters.
                     </p>
                   </>
