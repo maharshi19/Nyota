@@ -43,6 +43,8 @@ Feel free to add additional columns to the CSV and update `server.js`/`types.ts`
 
 This repo is now configured to deploy as a single Render Web Service (frontend + API).
 
+Docker deployment is included via `Dockerfile` and `render.yaml` (`runtime: docker`).
+
 1. Push your latest code to GitHub.
 2. In Render, click `New +` -> `Blueprint` and select this repo.
 3. Render will pick up `render.yaml` automatically.
@@ -54,4 +56,5 @@ Notes:
 - Health check endpoint: `/api/health`
 - Server uses Render's `PORT` automatically.
 - The built Vite app is served by Express in production.
+- Render will build directly from the repository Dockerfile.
 
