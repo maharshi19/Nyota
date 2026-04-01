@@ -23,13 +23,18 @@ View your app in AI Studio: https://ai.studio/apps/drive/15tMAvdI6RIFNGDi8tA66bl
 
 ## Live CSV dashboard data
 
-The dashboard values are no longer hardcoded. A small Express server (`server.js`) reads `maternal_data.csv` from `../nyota-api-local` and
-serves JSON at `/api/board`. The front end fetches this endpoint on startup (and polls every 30 s), so any edits to the CSV are reflected in
+The dashboard values are no longer hardcoded. A small Express server (`server.js`) reads `data/maternal_data.csv` and
+serves JSON at `/api/board`. The front end fetches this endpoint on startup (and polls every 30 seconds), so any edits to the CSV are reflected in
 the UI.
+
+The ML assets are included in this repo at `models_senior_v4/`:
+- `event72h_model.joblib`
+- `meta.json`
+- `perm_importance_test.csv`
 
 **Setup:**
 1. Install the new dependencies by rerunning `npm install` (adds `express`, `csv-parser`, `cors`).
-2. Start the CSV backend in another terminal with `npm run csv-server` (listens on port 3001).
+2. Start the CSV/backend server in another terminal with `npm run csv-server` (defaults to port `3009`, or `PORT` when deployed).
 3. Launch the React dev server (`npm run dev`); Vite proxies `/api/*` to the backend.
 
 Feel free to add additional columns to the CSV and update `server.js`/`types.ts` accordingly.

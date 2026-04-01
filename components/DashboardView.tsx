@@ -24,6 +24,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
 
   const allItems = useMemo(() => groups.flatMap(g => g.items), [groups]);
   const [mapOverlay, setMapOverlay] = useState<'clinical' | 'environmental' | 'resource'>('environmental');
+  const [mapViewMode, setMapViewMode] = useState<'canvas' | 'map'>('canvas');
 
   // Filter items based on selected overlay
   const filteredItems = useMemo(() => {
@@ -189,52 +190,42 @@ const DashboardView: React.FC<DashboardViewProps> = ({ groups }) => {
 
         {/* 3. ENVIRONMENTAL RISK MAP (Center Workspace) */}
         <div className="xl:col-span-6 flex flex-col gap-6 h-[calc(100vh-320px)]">
-           <div className="flex-1 rounded-3xl border shadow-sm overflow-hidden relative" style={{ borderColor: palette.border, backgroundColor: palette.card }}>
-              <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
-                 <button 
-                  onClick={() => setMapOverlay('clinical')}
-                  className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all duration-300 transform hover:scale-105 ${
-                    mapOverlay === 'clinical' 
-                      ? 'text-white border-transparent shadow-lg' 
-                          : 'backdrop-blur text-slate-700 hover:shadow-md'
-                  }`}
-                          style={mapOverlay === 'clinical' ? { backgroundColor: palette.critical, borderColor: 'transparent' } : { backgroundColor: warmPanelBg, borderColor: palette.borderLight }}
-                 >
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className={`w-3 h-3 ${mapOverlay === 'clinical' ? 'text-white' : ''}`} style={mapOverlay === 'clinical' ? undefined : { color: palette.rose }} />
-                    Clinical Clusters
-                  </div>
-                 </button>
-                 <button 
-                  onClick={() => setMapOverlay('environmental')}
-                  className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all duration-300 transform hover:scale-105 ${
-                    mapOverlay === 'environmental' 
-                      ? 'text-white border-transparent shadow-lg' 
-                          : 'backdrop-blur text-slate-700 hover:shadow-md'
-                  }`}
-                          style={mapOverlay === 'environmental' ? { backgroundColor: palette.teal, borderColor: 'transparent' } : { backgroundColor: coolPanelBg, borderColor: palette.borderLight }}
-                 >
-                  <div className="flex items-center gap-2">
-                    <Thermometer className={`w-3 h-3 ${mapOverlay === 'environmental' ? 'text-white' : ''}`} style={mapOverlay === 'environmental' ? undefined : { color: palette.sage }} />
-                    Env Stressors
-                  </div>
-                 </button>
-                 <button 
-                  onClick={() => setMapOverlay('resource')}
-                  className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all duration-300 transform hover:scale-105 ${
-                    mapOverlay === 'resource' 
-                      ? 'text-white border-transparent shadow-lg' 
-                          : 'backdrop-blur text-slate-700 hover:shadow-md'
-                  }`}
-                          style={mapOverlay === 'resource' ? { backgroundColor: palette.gold, borderColor: 'transparent' } : { backgroundColor: softPanelBg, borderColor: palette.borderLight }}
-                 >
-                  <div className="flex items-center gap-2">
-                    <ShoppingBasket className={`w-3 h-3 ${mapOverlay === 'resource' ? 'text-white' : ''}`} style={mapOverlay === 'resource' ? undefined : { color: palette.gold }} />
-                    Resource Gaps
-                  </div>
-                 </button>
+            <div className="flex-1 rounded-3xl border shadow-sm overflow-hidden relative" style={{ borderColor: palette.border, backgroundColor: palette.card }}>
+              <div className="px-4 py-3 border-b flex flex-col sm:flex-row sm:items-end gap-3" style={{ borderColor: palette.border, background: 'linear-gradient(180deg, #eef5f1, #e7efea)' }}>
+                <div className="flex-1 min-w-[160px]">
+                  <label className="text-[10px] font-black uppercase tracking-widest block mb-1" style={{ color: palette.textMid }}>
+                    Cluster Overlay
+                  </label>
+                  <select
+                    value={mapOverlay}
+                    onChange={(e) => setMapOverlay(e.target.value as 'clinical' | 'environmental' | 'resource')}
+                    className="w-full rounded-xl border px-3 py-2 text-xs font-bold bg-white text-slate-700"
+                    style={{ borderColor: palette.border }}
+                  >
+                    <option value="clinical">Clinical Clusters</option>
+                    <option value="environmental">Environmental Stressors</option>
+                    <option value="resource">Resource Gaps</option>
+                  </select>
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <label className="text-[10px] font-black uppercase tracking-widest block mb-1" style={{ color: palette.textMid }}>
+                    Map View Mode
+                  </label>
+                  <select
+                    value={mapViewMode}
+                    onChange={(e) => setMapViewMode(e.target.value as 'canvas' | 'map')}
+                    className="w-full rounded-xl border px-3 py-2 text-xs font-bold bg-white text-slate-700"
+                    style={{ borderColor: palette.border }}
+                  >
+                    <option value="canvas">Canvas View</option>
+                    <option value="map">Geographic Map</option>
+                  </select>
+                </div>
+                <div className="text-[10px] font-bold px-3 py-2 rounded-xl self-start sm:self-auto" style={{ backgroundColor: '#e8f1ec', color: palette.textMid }}>
+                  {filteredItems.length} members in selected layer
+                </div>
               </div>
-              <EnvironmentalRiskMap overlay={mapOverlay} />
+              <EnvironmentalRiskMap overlay={mapOverlay} viewMode={mapViewMode} />
               <div className="absolute bottom-4 left-4 backdrop-blur-md p-4 rounded-2xl border max-w-[280px] z-20" style={{ backgroundColor: '#f8fcfaef', borderColor: palette.border, boxShadow: '0 10px 24px rgba(25,55,48,0.12)' }}>
                 {mapOverlay === 'clinical' && (
                   <>

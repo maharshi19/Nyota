@@ -1,0 +1,99 @@
+{
+  "target": "event_within_72h",
+  "group_col": "member_id",
+  "time_col": "ts",
+  "dropped_datetime_cols": [
+    "enrollment_date",
+    "pregnancy_start_date",
+    "ts"
+  ],
+  "drop_cols": [
+    "composite_score",
+    "delivery_date",
+    "event_within_72h",
+    "member_id",
+    "ml_prob_72h",
+    "model_version",
+    "race_ethnicity",
+    "rule_score",
+    "zip"
+  ],
+  "numeric_cols": [
+    "sbp",
+    "dbp",
+    "hrv",
+    "weight",
+    "sbp_trend_24h",
+    "hrv_trend_24h",
+    "bmi",
+    "prev_preeclampsia",
+    "is_ntsv",
+    "housing_instability",
+    "food_insecurity",
+    "transportation_barrier",
+    "utility_need",
+    "interpersonal_safety",
+    "temp_f",
+    "humidity",
+    "aqi",
+    "heat_island_index",
+    "transit_reliability_index",
+    "distance_to_birthing_hospital_mi",
+    "food_desert",
+    "pharmacy_desert",
+    "hrsn_count",
+    "days_since_enrollment",
+    "gestation_days_at_ts",
+    "hour_of_day",
+    "day_of_week",
+    "pulse_pressure",
+    "map",
+    "sbp_ge_140",
+    "dbp_ge_90",
+    "sbp_ge_160",
+    "dbp_ge_110",
+    "any_htn",
+    "severe_htn",
+    "sbp_minus_trend24h",
+    "heat_x_temp",
+    "dist_x_htn"
+  ],
+  "categorical_cols": [
+    "region"
+  ],
+  "engineered_features_added": [
+    "pulse_pressure",
+    "map",
+    "sbp_ge_140",
+    "dbp_ge_90",
+    "sbp_ge_160",
+    "dbp_ge_110",
+    "any_htn",
+    "severe_htn",
+    "sbp_minus_trend24h",
+    "heat_x_temp",
+    "dist_x_htn"
+  ],
+  "cv_ap_mean": 0.2642336344142576,
+  "cv_ap_std": 0.063816142187832,
+  "alert_threshold": 0.08198893474190319,
+  "threshold_found_under_constraints": true,
+  "target_recall": 0.6,
+  "min_precision": 0.15,
+  "tier_thresholds": {
+    "tier4": 0.2805258371213723,
+    "tier3": 0.19470706821788414,
+    "tier2": 0.11788652035931896
+  },
+  "val_metrics": {
+    "ap": 0.22571231265998734,
+    "auc": 0.6827462507308902,
+    "brier": 0.0944237717252133
+  },
+  "test_metrics": {
+    "ap": 0.24379709120557286,
+    "auc": 0.6513398335828242,
+    "brier": 0.11115980720792465
+  },
+  "version": "senior_v4_feature_engineering_groupkfold"
+}

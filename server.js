@@ -74,9 +74,12 @@ const upload = multer({
 let mlModel = null;
 let modelMeta = null;
 let featureImportance = null;
-const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || 'C:/Users/Maharshi/AppData/Local/Programs/Python/Python312/python.exe';
+const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || (process.platform === 'win32' ? 'python' : 'python3');
 const PYTHON_INFERENCE_SCRIPT = path.resolve(__dirname, './utils/ml_predict.py');
-const MODEL_JOBLIB_PATH = path.resolve(__dirname, '../models_senior_v4/event72h_model.joblib');
+const MODEL_DIR = path.resolve(__dirname, './models_senior_v4');
+const MODEL_JOBLIB_PATH = path.join(MODEL_DIR, 'event72h_model.joblib');
+const MODEL_META_PATH = path.join(MODEL_DIR, 'meta.json');
+const MODEL_IMPORTANCE_PATH = path.join(MODEL_DIR, 'perm_importance_test.csv');
 
 function getTierThresholds() {
   return {
@@ -186,12 +189,12 @@ function scoreFallback(features) {
 
 try {
   console.log('Loading ML model...');
-  modelMeta = JSON.parse(fs.readFileSync(path.join(__dirname, '../models_senior_v4/meta.json'), 'utf8'));
+  modelMeta = JSON.parse(fs.readFileSync(MODEL_META_PATH, 'utf8'));
   console.log('✅ ML model metadata loaded');
   
   // Load feature importance
   const importanceData = [];
-  fs.createReadStream(path.join(__dirname, '../models_senior_v4/perm_importance_test.csv'))
+  fs.createReadStream(MODEL_IMPORTANCE_PATH)
     .pipe(csvParser())
     .on('data', (row) => importanceData.push(row))
     .on('end', () => {
@@ -205,8 +208,9 @@ try {
   console.log('⚠️ ML model not available:', error.message);
 }
 
-// adjust this path if your csv lives elsewhere
-const CSV_PATH = path.resolve(__dirname, '../nyota-api-local/maternal_data.csv');
+const CSV_PATH = process.env.MATERNAL_DATA_CSV_PATH
+  ? path.resolve(__dirname, process.env.MATERNAL_DATA_CSV_PATH)
+  : path.resolve(__dirname, './data/maternal_data.csv');
 const FACILITY_CSV_PATH = process.env.BIRTHING_FACILITIES_CSV_PATH
   ? path.resolve(__dirname, process.env.BIRTHING_FACILITIES_CSV_PATH)
   : path.resolve(__dirname, './data/birthing_facilities.csv');
