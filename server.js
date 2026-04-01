@@ -1656,4 +1656,21 @@ app.delete('/api/users/:id', requireAuth(['admin']), (req, res) => {
 
   // ===== END CAREFORCE & HEDIS =====
 
-app.listen(3009, () => console.log('csv server listening on 3009'));
+  app.get('/api/health', (_req, res) => {
+    res.json({ ok: true, service: 'nyota-api' });
+  });
+
+  const DIST_PATH = path.resolve(__dirname, './dist');
+  if (fs.existsSync(DIST_PATH)) {
+    app.use(express.static(DIST_PATH));
+
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) {
+        return next();
+      }
+      return res.sendFile(path.join(DIST_PATH, 'index.html'));
+    });
+  }
+
+  const PORT = Number(process.env.PORT) || 3009;
+  app.listen(PORT, () => console.log(`server listening on ${PORT}`));

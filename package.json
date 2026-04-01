@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "node server.js",
+    "render-build": "npm install && npm run build",
     "preview": "vite preview",
     "csv-server": "node server.js",
     "csv-server:win": "powershell -c \"$c=Get-NetTCPConnection -LocalPort 3009 -State Listen -EA SilentlyContinue; if($c){Stop-Process -Id $c.OwningProcess -Force}\" & node server.js"

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: nyota-health
+    runtime: node
+    plan: free
+    buildCommand: npm run render-build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

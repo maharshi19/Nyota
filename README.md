@@ -34,3 +34,19 @@ the UI.
 
 Feel free to add additional columns to the CSV and update `server.js`/`types.ts` accordingly.
 
+## Deploy On Render
+
+This repo is now configured to deploy as a single Render Web Service (frontend + API).
+
+1. Push your latest code to GitHub.
+2. In Render, click `New +` -> `Blueprint` and select this repo.
+3. Render will pick up `render.yaml` automatically.
+4. In service environment variables, set:
+   - `GEMINI_API_KEY` = your API key
+5. Deploy.
+
+Notes:
+- Health check endpoint: `/api/health`
+- Server uses Render's `PORT` automatically.
+- The built Vite app is served by Express in production.
+
