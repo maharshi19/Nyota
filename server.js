@@ -27,11 +27,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-function getInternalApiBaseUrl() {
-  const port = Number(process.env.PORT) || 3009;
-  return `http://127.0.0.1:${port}`;
-}
-
 function bootstrapGeminiKey() {
   if (process.env.GEMINI_API_KEY) return;
 
@@ -527,9 +522,7 @@ function makeBoardGroups(rows) {
 
 app.get('/api/board', async (req, res) => {
   try {
-    // Use aggregated data that includes both CSV and MCO submissions
-    const response = await fetch(`${getInternalApiBaseUrl()}/api/mco/aggregated-data`);
-    const data = await response.json();
+    const data = await buildAggregatedDataPayload();
     res.json(data);
   } catch (err) {
     console.error('Error fetching aggregated data:', err);
@@ -1039,185 +1032,172 @@ app.post('/api/mco/upload-data', upload.single('file'), async (req, res) => {
 });
 
 // Get aggregated MCO data for dashboard
-app.get('/api/mco/aggregated-data', async (req, res) => {
+async function buildAggregatedDataPayload() {
+  // Get CSV data
+  const csvRows = await parseCsv();
+
+  // Convert MCO submissions to board item format
+  const mcoItems = mcoDataStore.submissions.map((submission) => {
+    const clinical = submission.clinicalData || {};
+    const environmental = submission.environmentalData || {};
+    const resource = submission.resourceData || {};
+
+    // Calculate risk status
+    let status = 'Stable';
+    if (clinical.sbp > 160 || clinical.dbp > 100 || clinical.smmCondition) {
+      status = 'Critical';
+    } else if (clinical.sbp > 140 || clinical.dbp > 90 || clinical.hypertension || clinical.diabetes) {
+      status = 'Reviewing';
+    }
+
+    // Calculate NICU probability based on clinical data
+    let nicuProbability = 25; // Base probability
+    if (clinical.sbp > 160) nicuProbability += 40;
+    else if (clinical.sbp > 140) nicuProbability += 20;
+    if (clinical.diabetes) nicuProbability += 15;
+    if (clinical.hypertension) nicuProbability += 10;
+    if (environmental.heatIslandIndex > 0.7) nicuProbability += 10;
+    nicuProbability = Math.min(95, Math.max(5, nicuProbability));
+
+    let nicuCategory = 'Low Prob';
+    if (nicuProbability > 70) nicuCategory = 'High Prob';
+    else if (nicuProbability > 50) nicuCategory = 'Rising Prob';
+
+    return {
+      id: submission.id,
+      name: submission.name || `Patient ${submission.patientId}`,
+      mrn: `MCO-${submission.patientId}`,
+      status,
+      triage: clinical.sbp > 160 ? '2 - Emergent' : clinical.sbp > 140 ? '3 - Urgent' : '4 - Less Urgent',
+      riskRank: Math.round(nicuProbability),
+      assignee: null,
+      lastVitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
+      updatesCount: status === 'Critical' ? 2 : 0,
+      lastUpdated: 'Just submitted',
+      caseData: {
+        ssn: `MCO-${submission.patientId}`,
+        age: String(submission.age || 'Unknown'),
+        gestation: 'Unknown',
+        parity: 'Unknown',
+        chiefComplaint: clinical.smmCondition || 'MCO Submission',
+        vitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
+        environmental: {
+          zipCode: submission.zipCode || 'Unknown',
+          airQuality: String(environmental.aqi || 'Unknown'),
+          heatIndex: environmental.heatIslandIndex || 0,
+        },
+        hypertension: clinical.hypertension,
+        diabetes: clinical.diabetes,
+        foodDesert: resource.foodDesert,
+        transportationAccess: resource.transportationAccess,
+        heatIslandIndex: environmental.heatIslandIndex,
+        aqi: environmental.aqi,
+      },
+      nicuCategory,
+      nicuProbability: Math.round(nicuProbability),
+      smmCondition: clinical.smmCondition || (clinical.hypertension ? 'Hypertension' : clinical.diabetes ? 'Diabetes' : 'None'),
+      ppcPre: nicuProbability < 30,
+      ppcPost: nicuProbability < 40,
+      estimatedSavings: Math.round(nicuProbability * 50 + Math.random() * 200),
+      mcoId: submission.mcoId,
+      source: submission.source || 'mco-submission',
+    };
+  });
+
+  // Combine CSV data with MCO data
+  const allItems = [...csvRows.map((r, i) => {
+    const sbp = Number(r.sbp) || 0;
+    const dbp = Number(r.dbp) || 0;
+    const aqi = Number(r.aqi) || 0;
+    const ruleScore = Number(r.rule_score) || 0;
+    const event72h = r.event_within_72h === '1' || r.event_within_72h === 'true';
+
+    let status = 'Stable';
+    if (event72h || ruleScore > 50) status = 'Critical';
+    else if (sbp > 160 || dbp > 100 || aqi > 150) status = 'Reviewing';
+
+    let nicuCategory = 'Low Prob';
+    let nicuProbability = Math.min(95, Math.max(5, ruleScore * 2));
+    if (ruleScore > 70) {
+      nicuCategory = 'High Prob';
+      nicuProbability = Math.min(95, 70 + Math.random() * 25);
+    } else if (ruleScore > 50) {
+      nicuCategory = 'Rising Prob';
+      nicuProbability = Math.min(69, 40 + Math.random() * 30);
+    } else {
+      nicuProbability = Math.max(5, Math.random() * 39);
+    }
+
+    const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
+    const name = `Member ${r.member_id.substring(0, 4).toUpperCase()}`;
+    const mrn = `MRN-${String(i + 1000).slice(-5)}`;
+
+    return {
+      id: `csv-${i}`,
+      name,
+      mrn,
+      status,
+      triage: sbp > 160 ? '2 - Emergent' : sbp > 140 ? '3 - Urgent' : '4 - Less Urgent',
+      riskRank: Math.round(ruleScore),
+      assignee: null,
+      lastVitals,
+      updatesCount: event72h ? 3 : 0,
+      lastUpdated: '5m ago',
+      caseData: {
+        ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
+        age: String(Math.floor(Math.random() * 25 + 18)),
+        gestation: String(Math.floor(Math.random() * 6 + 24)) + 'w' + String(Math.floor(Math.random() * 7)) + 'd',
+        parity: 'G' + String(Math.floor(Math.random() * 4 + 1)) + 'P' + String(Math.floor(Math.random() * 3)),
+        chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
+        vitals: lastVitals,
+        environmental: {
+          zipCode: r.zip || 'Unknown',
+          airQuality: aqi.toString(),
+          heatIndex: Number(r.temp_f) || 0,
+        },
+      },
+      nicuCategory,
+      nicuProbability: Math.round(nicuProbability),
+      smmCondition: sbp > 160 ? 'Hypertension' : aqi > 150 ? 'Air Quality' : 'None',
+      ppcPre: ruleScore < 30,
+      ppcPost: ruleScore < 40,
+      estimatedSavings: Math.round(ruleScore * 100 + Math.random() * 500),
+      source: 'csv-data',
+    };
+  }), ...mcoItems];
+
+  // Group by status for dashboard view
+  const criticalItems = allItems.filter(i => i.status === 'Critical');
+  const reviewingItems = allItems.filter(i => i.status === 'Reviewing');
+  const stableItems = allItems.filter(i => i.status === 'Stable');
+
+  const groups = [];
+  if (criticalItems.length > 0) {
+    groups.push({ id: 'g1', title: '🚨 72-Hour Critical Window', color: 'rose', items: criticalItems });
+  }
+  if (reviewingItems.length > 0) {
+    groups.push({ id: 'g2', title: '⚠️ Elevated Monitoring', color: 'amber', items: reviewingItems });
+  }
+  if (stableItems.length > 0) {
+    groups.push({ id: 'g3', title: '🛡️ Stable Members', color: 'emerald', items: stableItems });
+  }
+
+  return {
+    groups: groups.length > 0 ? groups : [{ id: 'g0', title: 'All Members', color: 'indigo', items: allItems.slice(0, 20) }],
+    stats: {
+      totalPatients: allItems.length,
+      csvPatients: csvRows.length,
+      mcoPatients: mcoItems.length,
+      mcoStats: mcoDataStore.mcoStats,
+      lastUpdated: mcoDataStore.lastUpdated,
+    },
+  };
+}
+
+app.get('/api/mco/aggregated-data', async (_req, res) => {
   try {
-    // Get CSV data
-    const csvRows = await parseCsv();
-
-    // Convert MCO submissions to board item format
-    const mcoItems = mcoDataStore.submissions.map((submission, index) => {
-      const clinical = submission.clinicalData || {};
-      const environmental = submission.environmentalData || {};
-      const resource = submission.resourceData || {};
-
-      // Calculate risk status
-      let status = 'Stable';
-      if (clinical.sbp > 160 || clinical.dbp > 100 || clinical.smmCondition) {
-        status = 'Critical';
-      } else if (clinical.sbp > 140 || clinical.dbp > 90 || clinical.hypertension || clinical.diabetes) {
-        status = 'Reviewing';
-      }
-
-      // Calculate NICU probability based on clinical data
-      let nicuProbability = 25; // Base probability
-      if (clinical.sbp > 160) nicuProbability += 40;
-      else if (clinical.sbp > 140) nicuProbability += 20;
-      if (clinical.diabetes) nicuProbability += 15;
-      if (clinical.hypertension) nicuProbability += 10;
-      if (environmental.heatIslandIndex > 0.7) nicuProbability += 10;
-      nicuProbability = Math.min(95, Math.max(5, nicuProbability));
-
-      let nicuCategory = 'Low Prob';
-      if (nicuProbability > 70) nicuCategory = 'High Prob';
-      else if (nicuProbability > 50) nicuCategory = 'Rising Prob';
-
-      return {
-        id: submission.id,
-        name: submission.name || `Patient ${submission.patientId}`,
-        mrn: `MCO-${submission.patientId}`,
-        status,
-        triage: clinical.sbp > 160 ? '2 - Emergent' : clinical.sbp > 140 ? '3 - Urgent' : '4 - Less Urgent',
-        riskRank: Math.round(nicuProbability),
-        assignee: null,
-        lastVitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
-        updatesCount: status === 'Critical' ? 2 : 0,
-        lastUpdated: 'Just submitted',
-        caseData: {
-          ssn: `MCO-${submission.patientId}`,
-          age: String(submission.age || 'Unknown'),
-          gestation: 'Unknown', // MCO might not have this
-          parity: 'Unknown', // MCO might not have this
-          chiefComplaint: clinical.smmCondition || 'MCO Submission',
-          vitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
-          environmental: {
-            zipCode: submission.zipCode || 'Unknown',
-            airQuality: String(environmental.aqi || 'Unknown'),
-            heatIndex: environmental.heatIslandIndex || 0,
-          },
-          // Add MCO-specific data
-          hypertension: clinical.hypertension,
-          diabetes: clinical.diabetes,
-          foodDesert: resource.foodDesert,
-          transportationAccess: resource.transportationAccess,
-          heatIslandIndex: environmental.heatIslandIndex,
-          aqi: environmental.aqi
-        },
-        nicuCategory,
-        nicuProbability: Math.round(nicuProbability),
-        smmCondition: clinical.smmCondition || (clinical.hypertension ? 'Hypertension' : clinical.diabetes ? 'Diabetes' : 'None'),
-        ppcPre: nicuProbability < 30,
-        ppcPost: nicuProbability < 40,
-        estimatedSavings: Math.round(nicuProbability * 50 + Math.random() * 200),
-        mcoId: submission.mcoId,
-        source: submission.source || 'mco-submission'
-      };
-    });
-
-    // Combine CSV data with MCO data
-    const allItems = [...csvRows.map((r, i) => {
-      // Transform CSV row to board item (existing logic)
-      const sbp = Number(r.sbp) || 0;
-      const dbp = Number(r.dbp) || 0;
-      const aqi = Number(r.aqi) || 0;
-      const ruleScore = Number(r.rule_score) || 0;
-      const event72h = r.event_within_72h === '1' || r.event_within_72h === 'true';
-
-      let status = 'Stable';
-      if (event72h || ruleScore > 50) status = 'Critical';
-      else if (sbp > 160 || dbp > 100 || aqi > 150) status = 'Reviewing';
-
-      let nicuCategory = 'Low Prob';
-      let nicuProbability = Math.min(95, Math.max(5, ruleScore * 2));
-      if (ruleScore > 70) {
-        nicuCategory = 'High Prob';
-        nicuProbability = Math.min(95, 70 + Math.random() * 25);
-      } else if (ruleScore > 50) {
-        nicuCategory = 'Rising Prob';
-        nicuProbability = Math.min(69, 40 + Math.random() * 30);
-      } else {
-        nicuProbability = Math.max(5, Math.random() * 39);
-      }
-
-      const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
-      const name = `Member ${r.member_id.substring(0, 4).toUpperCase()}`;
-      const mrn = `MRN-${String(i + 1000).slice(-5)}`;
-
-      return {
-        id: `csv-${i}`,
-        name,
-        mrn,
-        status,
-        triage: sbp > 160 ? '2 - Emergent' : sbp > 140 ? '3 - Urgent' : '4 - Less Urgent',
-        riskRank: Math.round(ruleScore),
-        assignee: null,
-        lastVitals,
-        updatesCount: event72h ? 3 : 0,
-        lastUpdated: '5m ago',
-        caseData: {
-          ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
-          age: String(Math.floor(Math.random() * 25 + 18)),
-          gestation: String(Math.floor(Math.random() * 6 + 24)) + 'w' + String(Math.floor(Math.random() * 7)) + 'd',
-          parity: 'G' + String(Math.floor(Math.random() * 4 + 1)) + 'P' + String(Math.floor(Math.random() * 3)),
-          chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
-          vitals: lastVitals,
-          environmental: {
-            zipCode: r.zip || 'Unknown',
-            airQuality: aqi.toString(),
-            heatIndex: Number(r.temp_f) || 0,
-          },
-        },
-        nicuCategory,
-        nicuProbability: Math.round(nicuProbability),
-        smmCondition: sbp > 160 ? 'Hypertension' : aqi > 150 ? 'Air Quality' : 'None',
-        ppcPre: ruleScore < 30,
-        ppcPost: ruleScore < 40,
-        estimatedSavings: Math.round(ruleScore * 100 + Math.random() * 500),
-        source: 'csv-data'
-      };
-    }), ...mcoItems];
-
-    // Group by status for dashboard view
-    const criticalItems = allItems.filter(i => i.status === 'Critical');
-    const reviewingItems = allItems.filter(i => i.status === 'Reviewing');
-    const stableItems = allItems.filter(i => i.status === 'Stable');
-
-    const groups = [];
-    if (criticalItems.length > 0) {
-      groups.push({
-        id: 'g1',
-        title: '🚨 72-Hour Critical Window',
-        color: 'rose',
-        items: criticalItems, // Remove slice(0, 15) to show all items
-      });
-    }
-    if (reviewingItems.length > 0) {
-      groups.push({
-        id: 'g2',
-        title: '⚠️ Elevated Monitoring',
-        color: 'amber',
-        items: reviewingItems, // Remove slice(0, 15) to show all items
-      });
-    }
-    if (stableItems.length > 0) {
-      groups.push({
-        id: 'g3',
-        title: '🛡️ Stable Members',
-        color: 'emerald',
-        items: stableItems, // Remove slice(0, 15) to show all items
-      });
-    }
-
-    res.json({
-      groups: groups.length > 0 ? groups : [{ id: 'g0', title: 'All Members', color: 'indigo', items: allItems.slice(0, 20) }],
-      stats: {
-        totalPatients: allItems.length,
-        csvPatients: csvRows.length,
-        mcoPatients: mcoItems.length,
-        mcoStats: mcoDataStore.mcoStats,
-        lastUpdated: mcoDataStore.lastUpdated
-      }
-    });
-
+    const payload = await buildAggregatedDataPayload();
+    res.json(payload);
   } catch (error) {
     console.error('Error aggregating MCO data:', error);
     res.status(500).json({ error: 'Failed to aggregate data' });
@@ -1609,9 +1589,7 @@ app.delete('/api/users/:id', requireAuth(['admin']), (req, res) => {
   // GET /api/hedis – HEDIS metrics computed from board data (any authenticated user)
   app.get('/api/hedis', requireAuth([]), async (req, res) => {
     try {
-      const response = await fetch(`${getInternalApiBaseUrl()}/api/mco/aggregated-data`);
-      if (!response.ok) throw new Error('Failed to fetch aggregated data');
-      const data = await response.json();
+      const data = await buildAggregatedDataPayload();
       const items = (data.groups || []).flatMap(g => g.items);
 
       const total = items.length;
