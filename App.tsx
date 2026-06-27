@@ -105,7 +105,7 @@ const MOCK_TEAM: TeamMember[] = [
 type ViewType = 'board' | 'dashboard' | 'equity' | 'facility' | 'support' | 'birthplan' | 'hedis' | 'careforce' | 'stratification' | 'environment-sdoh' | 'roi' | 'quality-scorecard' | 'clinical-diagnostics' | 'messaging' | 'system-pulse' | 'tower-config' | 'high-urgency-feed' | 'clinical-board' | 'admin-dashboard' | 'user-management' | 'supervisor-dashboard';
 
 function AppInner() {
-  const { isLoading, isAuthenticated, session, logout } = useAuth();
+  const { isLoading, isAuthenticated, session, token, logout } = useAuth();
   const palette = dashboardTheme;
   const [boardGroups, setBoardGroups] = useState<BoardGroup[]>([]);
   const [selectedItem, setSelectedItem] = useState<BoardItem | null>(null);
@@ -132,12 +132,18 @@ function AppInner() {
   // load data from CSV-backed API on mount — all hooks must be before early returns
   const refreshBoardData = useCallback(async () => {
     if (!isAuthenticated) return;
-    const res = await fetch('/api/board');
+    const res = await fetch('/api/board', {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (res.status === 401 || res.status === 402) {
+      logout();
+      return;
+    }
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
     setBoardGroups(data.groups || []);
     console.log('[App] Data loaded successfully:', data.groups?.length, 'groups');
-  }, [isAuthenticated]);
+  }, [isAuthenticated, logout, token]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

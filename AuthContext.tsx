@@ -30,6 +30,14 @@ interface AuthContextType {
 // ─── Context ──────────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
 
+function readAuthUser(payload: unknown): AuthUser | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const wrapped = payload as { user?: unknown };
+  const candidate = wrapped.user && typeof wrapped.user === 'object' ? wrapped.user : payload;
+  const authUser = candidate as Partial<AuthUser>;
+  return authUser.id && authUser.email ? authUser as AuthUser : null;
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user,      setUser]      = useState<AuthUser | null>(null);
@@ -42,9 +50,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!stored) { setIsLoading(false); return; }
 
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${stored}` } })
-      .then(r => (r.ok ? r.json() : null))
+      .then(async r => (r.ok ? readAuthUser(await r.json()) : null))
       .then(userData => {
-        if (userData) { setToken(stored); setUser(userData as AuthUser); }
+        if (userData) { setToken(stored); setUser(userData); }
         else          { localStorage.removeItem('nyota_token'); }
       })
       .catch(() => localStorage.removeItem('nyota_token'))
@@ -61,10 +69,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const err = await res.json().catch(() => ({ error: 'Login failed' }));
       throw new Error(err.error || 'Login failed');
     }
-    const { token: newToken, user: userData } = await res.json();
+    const data = await res.json();
+    const newToken = data.token;
+    const userData = readAuthUser(data);
+    if (!newToken || !userData) throw new Error('Login response was incomplete');
     localStorage.setItem('nyota_token', newToken);
     setToken(newToken);
-    setUser(userData as AuthUser);
+    setUser(userData);
   }, []);
 
   const register = useCallback(async (name: string, email: string, password: string) => {
@@ -77,10 +88,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const err = await res.json().catch(() => ({ error: 'Signup failed' }));
       throw new Error(err.error || 'Signup failed');
     }
-    const { token: newToken, user: userData } = await res.json();
+    const data = await res.json();
+    const newToken = data.token;
+    const userData = readAuthUser(data);
+    if (!newToken || !userData) throw new Error('Signup response was incomplete');
     localStorage.setItem('nyota_token', newToken);
     setToken(newToken);
-    setUser(userData as AuthUser);
+    setUser(userData);
   }, []);
 
   const logout = useCallback(() => {
