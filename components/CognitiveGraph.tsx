@@ -53,14 +53,13 @@ const CognitiveGraph: React.FC<CognitiveGraphProps> = ({ facts, environmentalHis
         finalSize += 100;
       }
 
-      // Add jitter to prevent overlap and create a "clump" effect
-      const jitterX = (Math.random() - 0.5) * 8;
-      const jitterY = (Math.random() - 0.5) * 8;
+      const offset = ((index % 5) - 2) * 1.5;
+      const rowOffset = (Math.floor(index / 5) % 3 - 1) * 1.5;
 
       return {
         ...f,
-        x: baseX + jitterX,
-        y: finalY + jitterY,
+        x: baseX + offset,
+        y: finalY + rowOffset,
         z: finalSize,
         aggravated,
         id: index

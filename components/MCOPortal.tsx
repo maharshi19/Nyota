@@ -5,9 +5,10 @@ import { dashboardTheme as T } from '../utils/dashboardTheme';
 
 interface MCOPortalProps {
   onViewChange?: (view: string) => void;
+  onDataChanged?: () => void;
 }
 
-const MCOPortal: React.FC<MCOPortalProps> = ({ onViewChange }) => {
+const MCOPortal: React.FC<MCOPortalProps> = ({ onViewChange, onDataChanged }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'submit-data' | 'analytics'>('dashboard');
   const [mcoStats, setMcoStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,8 @@ const MCOPortal: React.FC<MCOPortalProps> = ({ onViewChange }) => {
 
   useEffect(() => {
     fetchMCOStats();
+    const interval = window.setInterval(fetchMCOStats, 10000);
+    return () => window.clearInterval(interval);
   }, []);
 
   const fetchMCOStats = async () => {
@@ -34,6 +37,7 @@ const MCOPortal: React.FC<MCOPortalProps> = ({ onViewChange }) => {
 
   const handleDataSubmitted = () => {
     fetchMCOStats(); // Refresh stats after submission
+    onDataChanged?.();
   };
 
   const handleFileUpload = async () => {
@@ -66,6 +70,7 @@ const MCOPortal: React.FC<MCOPortalProps> = ({ onViewChange }) => {
       );
       setUploadFile(null);
       fetchMCOStats();
+      onDataChanged?.();
     } catch (error) {
       console.error('Error uploading file:', error);
       setUploadResult('Upload failed. Please check your server connection and file format.');

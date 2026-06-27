@@ -201,6 +201,9 @@ export interface TeamMember {
   permissions?: UserPermissions;
   department?: string;
   supervisorId?: string;
+  subscriptionStatus?: 'trialing' | 'active' | 'expired' | 'canceled';
+  trialEndsAt?: string | null;
+  trialDaysRemaining?: number | null;
 }
 
 export interface UserPermissions {

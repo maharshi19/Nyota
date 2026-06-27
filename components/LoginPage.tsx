@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../AuthContext';
-import { Shield, Eye, EyeOff, LogIn } from 'lucide-react';
+import { Shield, Eye, EyeOff, LogIn, UserPlus } from 'lucide-react';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
 
+  const [mode,     setMode]     = useState<'signin' | 'trial'>('signin');
+  const [name,     setName]     = useState('');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [showPw,   setShowPw]   = useState(false);
@@ -16,9 +18,13 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      if (mode === 'trial') {
+        await register(name.trim(), email.trim(), password);
+      } else {
+        await login(email.trim(), password);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : mode === 'trial' ? 'Signup failed' : 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -27,8 +33,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-teal-900 to-slate-900">
       <div className="w-full max-w-md px-8 py-10 bg-white rounded-2xl shadow-2xl">
-
-        {/* Logo / Brand */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-14 h-14 rounded-full bg-teal-600 flex items-center justify-center mb-3 shadow-lg">
             <Shield className="w-7 h-7 text-white" />
@@ -37,8 +41,41 @@ export default function LoginPage() {
           <p className="text-sm text-slate-500 mt-1">Clinical Reasoning Platform</p>
         </div>
 
-        {/* Form */}
+        <div className="grid grid-cols-2 gap-1 p-1 mb-6 bg-slate-100 rounded-lg">
+          <button
+            type="button"
+            onClick={() => { setMode('signin'); setError(''); }}
+            className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'signin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('trial'); setError(''); }}
+            className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'trial' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Start trial
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-5">
+          {mode === 'trial' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Full name
+              </label>
+              <input
+                type="text"
+                required
+                autoComplete="name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Jane Smith"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+              />
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">
               Email address
@@ -62,10 +99,11 @@ export default function LoginPage() {
               <input
                 type={showPw ? 'text' : 'password'}
                 required
-                autoComplete="current-password"
+                minLength={mode === 'trial' ? 8 : undefined}
+                autoComplete={mode === 'trial' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder={mode === 'trial' ? 'At least 8 characters' : 'Password'}
                 className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent pr-10"
               />
               <button
@@ -91,17 +129,15 @@ export default function LoginPage() {
           >
             {loading ? (
               <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : mode === 'trial' ? (
+              <UserPlus className="w-4 h-4" />
             ) : (
               <LogIn className="w-4 h-4" />
             )}
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? (mode === 'trial' ? 'Creating trial...' : 'Signing in...') : (mode === 'trial' ? 'Start 30-day trial' : 'Sign in')}
           </button>
         </form>
 
-        {/* Default credentials hint for first-time setup */}
-        <p className="mt-6 text-xs text-center text-slate-400">
-          Default admin: <span className="font-mono">admin@nyota.health</span> / <span className="font-mono">Admin@2024</span>
-        </p>
       </div>
     </div>
   );

@@ -15,9 +15,15 @@ import {
   getUserById,
   getAllUsers,
   createUser,
+  createTrialUser,
   updateUser,
   deactivateUser,
   verifyPassword,
+  publicUser,
+  isUserTrialExpired,
+  listMcoSubmissions,
+  saveMcoSubmission,
+  usingPostgres,
 } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -439,12 +445,12 @@ function makeBoardGroups(rows) {
     let nicuProbability = Math.min(95, Math.max(5, ruleScore * 2)); // Convert to 5-95% range
     if (ruleScore > 70) {
       nicuCategory = 'High Prob';
-      nicuProbability = Math.min(95, 70 + Math.random() * 25); // 70-95%
+      nicuProbability = Math.min(95, Math.max(70, ruleScore));
     } else if (ruleScore > 50) {
       nicuCategory = 'Rising Prob';
-      nicuProbability = Math.min(69, 40 + Math.random() * 30); // 40-69%
+      nicuProbability = Math.min(69, Math.max(40, ruleScore));
     } else {
-      nicuProbability = Math.max(5, Math.random() * 39); // 5-39%
+      nicuProbability = Math.max(5, Math.min(39, ruleScore));
     }
     
     const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
@@ -464,9 +470,9 @@ function makeBoardGroups(rows) {
       lastUpdated: '5m ago',
       caseData: {
         ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
-        age: String(Math.floor(Math.random() * 25 + 18)),
-        gestation: String(Math.floor(Math.random() * 6 + 24)) + 'w' + String(Math.floor(Math.random() * 7)) + 'd',
-        parity: 'G' + String(Math.floor(Math.random() * 4 + 1)) + 'P' + String(Math.floor(Math.random() * 3)),
+        age: r.age ? String(r.age) : 'Unknown',
+        gestation: r.gestation || r.gestational_age || 'Unknown',
+        parity: r.parity || 'Unknown',
         chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
         vitals: lastVitals,
         environmental: {
@@ -480,7 +486,7 @@ function makeBoardGroups(rows) {
       smmCondition: sbp > 160 ? 'Hypertension' : aqi > 150 ? 'Air Quality' : 'None',
       ppcPre: ruleScore < 30,
       ppcPost: ruleScore < 40,
-      estimatedSavings: Math.round(ruleScore * 100 + Math.random() * 500),
+      estimatedSavings: Math.round(ruleScore * 100),
     };
   });
 
@@ -687,8 +693,40 @@ function ensureDataDir() {
   }
 }
 
-function loadMcoStore() {
+function rebuildMcoStats(submissions) {
+  const mcoStats = {};
+  for (const submission of submissions) {
+    const mcoId = submission.mcoId;
+    if (!mcoStats[mcoId]) {
+      mcoStats[mcoId] = {
+        totalSubmissions: 0,
+        lastSubmission: null,
+        patients: [],
+        riskDistribution: { Critical: 0, Reviewing: 0, Stable: 0 },
+      };
+    }
+    const stats = mcoStats[mcoId];
+    stats.totalSubmissions += 1;
+    stats.lastSubmission = submission.submittedAt;
+    stats.patients = Array.from(new Set([...(stats.patients || []), submission.patientId]));
+    stats.riskDistribution[submission.status] = (stats.riskDistribution[submission.status] || 0) + 1;
+  }
+  return mcoStats;
+}
+
+async function loadMcoStore() {
   try {
+    if (usingPostgres) {
+      const submissions = await listMcoSubmissions();
+      mcoDataStore = {
+        submissions: submissions || [],
+        mcoStats: rebuildMcoStats(submissions || []),
+        lastUpdated: submissions?.length ? submissions[submissions.length - 1].submittedAt : null,
+      };
+      console.log(`Loaded ${mcoDataStore.submissions.length} stored MCO submissions from PostgreSQL`);
+      return;
+    }
+
     ensureDataDir();
     if (!fs.existsSync(MCO_STORE_PATH)) {
       mcoDataStore = emptyMcoStore();
@@ -712,6 +750,7 @@ function loadMcoStore() {
 }
 
 function persistMcoStore() {
+  if (usingPostgres) return;
   try {
     ensureDataDir();
     fs.writeFileSync(MCO_STORE_PATH, JSON.stringify(mcoDataStore, null, 2), 'utf8');
@@ -734,6 +773,24 @@ function toBoolean(value) {
     return v === 'true' || v === '1' || v === 'yes' || v === 'y';
   }
   return false;
+}
+
+function normalizeHeatIndex(value) {
+  const heat = Number(value);
+  if (!Number.isFinite(heat)) return 0;
+  return heat <= 1 ? Math.round(heat * 100) : heat;
+}
+
+function buildMlPrediction(features) {
+  const thresholds = getTierThresholds();
+  const fallback = scoreFallback(features);
+  return {
+    prediction: fallback.prediction,
+    probability: Math.round(fallback.prediction * 100),
+    riskTier: getRiskTier(fallback.prediction, thresholds),
+    confidence: fallback.confidence,
+    source: 'js-fallback',
+  };
 }
 
 function getField(row, keys, fallback = undefined) {
@@ -789,7 +846,7 @@ function normalizeSubmission(input, source = 'mco-form') {
   const status = input.status || computeStatus(clinicalData);
 
   return {
-    id: `mco-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    id: `mco-${patientId || 'submission'}-${Date.now()}`,
     mcoId,
     patientId,
     name: String(input.name || '').trim(),
@@ -933,16 +990,17 @@ function upsertStats(submission) {
   stats.riskDistribution[submission.status] = (stats.riskDistribution[submission.status] || 0) + 1;
 }
 
-function storeSubmission(submission) {
+async function storeSubmission(submission) {
   mcoDataStore.submissions.push(submission);
   upsertStats(submission);
   mcoDataStore.lastUpdated = new Date().toISOString();
+  await saveMcoSubmission(submission);
 }
 
-loadMcoStore();
+await loadMcoStore();
 
 // MCO Form Submission Endpoint
-app.post('/api/mco/submit-data', (req, res) => {
+app.post('/api/mco/submit-data', async (req, res) => {
   try {
     const payload = req.body;
     const normalized = normalizeSubmission(payload, 'mco-form');
@@ -951,7 +1009,7 @@ app.post('/api/mco/submit-data', (req, res) => {
       return res.status(400).json({ error: 'Patient ID and MCO ID are required' });
     }
 
-    storeSubmission(normalized);
+    await storeSubmission(normalized);
     persistMcoStore();
 
     console.log(`✅ MCO ${normalized.mcoId} submitted data for patient ${normalized.patientId}`);
@@ -989,7 +1047,7 @@ app.post('/api/mco/upload-data', upload.single('file'), async (req, res) => {
     const accepted = [];
     const rejected = [];
 
-    rows.forEach((row, index) => {
+    for (const [index, row] of rows.entries()) {
       try {
         const submission = normalizeFlatRow(row, defaultMcoId);
 
@@ -1000,7 +1058,7 @@ app.post('/api/mco/upload-data', upload.single('file'), async (req, res) => {
           throw new Error('Missing mcoId');
         }
 
-        storeSubmission(submission);
+        await storeSubmission(submission);
         accepted.push(submission.id);
       } catch (error) {
         rejected.push({
@@ -1008,7 +1066,7 @@ app.post('/api/mco/upload-data', upload.single('file'), async (req, res) => {
           reason: error.message,
         });
       }
-    });
+    }
 
     persistMcoStore();
 
@@ -1041,66 +1099,100 @@ async function buildAggregatedDataPayload() {
     const clinical = submission.clinicalData || {};
     const environmental = submission.environmentalData || {};
     const resource = submission.resourceData || {};
+    const sbp = Number(clinical.sbp) || 120;
+    const dbp = Number(clinical.dbp) || 80;
+    const map = Math.round((sbp + 2 * dbp) / 3);
+    const pulsePressure = Math.max(20, sbp - dbp);
+    const heatIndex = normalizeHeatIndex(environmental.heatIslandIndex);
+    const aqi = Number(environmental.aqi) || 0;
+    const ml = buildMlPrediction({
+      sbp,
+      dbp,
+      map,
+      pulse_pressure: pulsePressure,
+      heat_island_index: heatIndex,
+      age: Number(submission.age) || 28,
+    });
 
-    // Calculate risk status
-    let status = 'Stable';
-    if (clinical.sbp > 160 || clinical.dbp > 100 || clinical.smmCondition) {
+    let status = submission.status || 'Stable';
+    if (ml.riskTier === 'Critical' || sbp >= 160 || dbp >= 100 || clinical.smmCondition) {
       status = 'Critical';
-    } else if (clinical.sbp > 140 || clinical.dbp > 90 || clinical.hypertension || clinical.diabetes) {
+    } else if (ml.riskTier === 'High' || ml.riskTier === 'Medium' || sbp >= 140 || dbp >= 90 || clinical.hypertension || clinical.diabetes || aqi >= 150) {
       status = 'Reviewing';
     }
 
-    // Calculate NICU probability based on clinical data
-    let nicuProbability = 25; // Base probability
-    if (clinical.sbp > 160) nicuProbability += 40;
-    else if (clinical.sbp > 140) nicuProbability += 20;
-    if (clinical.diabetes) nicuProbability += 15;
-    if (clinical.hypertension) nicuProbability += 10;
-    if (environmental.heatIslandIndex > 0.7) nicuProbability += 10;
-    nicuProbability = Math.min(95, Math.max(5, nicuProbability));
-
-    let nicuCategory = 'Low Prob';
-    if (nicuProbability > 70) nicuCategory = 'High Prob';
-    else if (nicuProbability > 50) nicuCategory = 'Rising Prob';
+    const nicuProbability = Number(clinical.nicuProbability) || ml.probability;
+    let nicuCategory = clinical.nicuCategory || 'Low Prob';
+    if (!clinical.nicuCategory) {
+      if (nicuProbability > 70) nicuCategory = 'High Prob';
+      else if (nicuProbability > 50) nicuCategory = 'Rising Prob';
+    }
+    const vitals = `BP ${sbp}/${dbp} | HR ${clinical.hr || 'N/A'} | AQI ${aqi || 'N/A'}`;
+    const submittedDate = submission.submittedAt ? new Date(submission.submittedAt) : null;
 
     return {
       id: submission.id,
       name: submission.name || `Patient ${submission.patientId}`,
       mrn: `MCO-${submission.patientId}`,
       status,
-      triage: clinical.sbp > 160 ? '2 - Emergent' : clinical.sbp > 140 ? '3 - Urgent' : '4 - Less Urgent',
-      riskRank: Math.round(nicuProbability),
+      triage: sbp >= 160 || status === 'Critical' ? '2 - Emergent' : sbp >= 140 || status === 'Reviewing' ? '3 - Urgent' : '4 - Less Urgent',
+      riskRank: Math.round(ml.probability),
       assignee: null,
-      lastVitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
+      lastVitals: vitals,
       updatesCount: status === 'Critical' ? 2 : 0,
-      lastUpdated: 'Just submitted',
+      lastUpdated: submittedDate ? submittedDate.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Just submitted',
       caseData: {
         ssn: `MCO-${submission.patientId}`,
+        patientId: submission.patientId,
         age: String(submission.age || 'Unknown'),
         gestation: 'Unknown',
         parity: 'Unknown',
         chiefComplaint: clinical.smmCondition || 'MCO Submission',
-        vitals: `BP ${clinical.sbp || 'N/A'}/${clinical.dbp || 'N/A'} | HR ${clinical.hr || 'N/A'}`,
-        environmental: {
-          zipCode: submission.zipCode || 'Unknown',
-          airQuality: String(environmental.aqi || 'Unknown'),
-          heatIndex: environmental.heatIslandIndex || 0,
-        },
+        vitals,
+        sbp,
+        dbp,
+        map,
+        pulsePressure,
+        hr: clinical.hr,
+        temp: clinical.temp,
+        rr: clinical.rr,
+        spo2: clinical.spo2,
+        bmi: clinical.bmi,
         hypertension: clinical.hypertension,
         diabetes: clinical.diabetes,
+        ruleScore: ml.probability,
+        eventWithin72h: ml.riskTier === 'Critical',
         foodDesert: resource.foodDesert,
-        transportationAccess: resource.transportationAccess,
-        heatIslandIndex: environmental.heatIslandIndex,
-        aqi: environmental.aqi,
+        foodInsecurity: resource.foodDesert,
+        transportationAccess: !resource.transportationAccess,
+        transportationBarrier: resource.transportationAccess,
+        healthcareFacilities: resource.healthcareFacilities,
+        communityCenters: resource.communityCenters,
+        emergencyServices: resource.emergencyServices,
+        pharmacyAccess: resource.pharmacyAccess,
+        heatIslandIndex: heatIndex,
+        aqi,
+        mcoId: submission.mcoId,
+        source: submission.source || 'mco-submission',
+        environmental: {
+          zipCode: submission.zipCode || 'Unknown',
+          airQuality: String(aqi || 'Unknown'),
+          heatIndex,
+          isHeatIsland: heatIndex >= 70,
+          foodDesertStatus: resource.foodDesert,
+          transportationDesertStatus: resource.transportationAccess,
+          maternityCareDesert: Number(resource.healthcareFacilities || 0) === 0,
+        },
       },
       nicuCategory,
       nicuProbability: Math.round(nicuProbability),
       smmCondition: clinical.smmCondition || (clinical.hypertension ? 'Hypertension' : clinical.diabetes ? 'Diabetes' : 'None'),
       ppcPre: nicuProbability < 30,
       ppcPost: nicuProbability < 40,
-      estimatedSavings: Math.round(nicuProbability * 50 + Math.random() * 200),
+      estimatedSavings: Math.round(nicuProbability * 50 + (status === 'Critical' ? 500 : status === 'Reviewing' ? 250 : 100)),
       mcoId: submission.mcoId,
       source: submission.source || 'mco-submission',
+      mlPrediction: ml,
     };
   });
 
@@ -1120,12 +1212,12 @@ async function buildAggregatedDataPayload() {
     let nicuProbability = Math.min(95, Math.max(5, ruleScore * 2));
     if (ruleScore > 70) {
       nicuCategory = 'High Prob';
-      nicuProbability = Math.min(95, 70 + Math.random() * 25);
+      nicuProbability = Math.min(95, Math.max(70, ruleScore));
     } else if (ruleScore > 50) {
       nicuCategory = 'Rising Prob';
-      nicuProbability = Math.min(69, 40 + Math.random() * 30);
+      nicuProbability = Math.min(69, Math.max(40, ruleScore));
     } else {
-      nicuProbability = Math.max(5, Math.random() * 39);
+      nicuProbability = Math.max(5, Math.min(39, ruleScore));
     }
 
     const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
@@ -1145,11 +1237,16 @@ async function buildAggregatedDataPayload() {
       lastUpdated: '5m ago',
       caseData: {
         ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
-        age: String(Math.floor(Math.random() * 25 + 18)),
-        gestation: String(Math.floor(Math.random() * 6 + 24)) + 'w' + String(Math.floor(Math.random() * 7)) + 'd',
-        parity: 'G' + String(Math.floor(Math.random() * 4 + 1)) + 'P' + String(Math.floor(Math.random() * 3)),
+        age: r.age ? String(r.age) : 'Unknown',
+        gestation: r.gestation || r.gestational_age || 'Unknown',
+        parity: r.parity || 'Unknown',
         chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
         vitals: lastVitals,
+        sbp,
+        dbp,
+        aqi,
+        ruleScore,
+        eventWithin72h: event72h,
         environmental: {
           zipCode: r.zip || 'Unknown',
           airQuality: aqi.toString(),
@@ -1161,7 +1258,7 @@ async function buildAggregatedDataPayload() {
       smmCondition: sbp > 160 ? 'Hypertension' : aqi > 150 ? 'Air Quality' : 'None',
       ppcPre: ruleScore < 30,
       ppcPost: ruleScore < 40,
-      estimatedSavings: Math.round(ruleScore * 100 + Math.random() * 500),
+      estimatedSavings: Math.round(ruleScore * 100),
       source: 'csv-data',
     };
   }), ...mcoItems];
@@ -1379,7 +1476,7 @@ function getJwtSecret() {
 }
 
 function requireAuth(roles) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Authentication required' });
@@ -1387,8 +1484,16 @@ function requireAuth(roles) {
     const token = auth.slice(7);
     try {
       const payload = jwt.verify(token, getJwtSecret());
+      const user = await getUserById(payload.userId);
+      if (!user) {
+        return res.status(401).json({ error: 'User not found or inactive' });
+      }
+      if (isUserTrialExpired(user)) {
+        return res.status(402).json({ error: 'Your 30-day trial has ended. Contact Nyota Health to activate your account.' });
+      }
       req.user = payload;
-      if (roles && roles.length > 0 && !roles.includes(payload.accessLevel)) {
+      req.currentUser = user;
+      if (roles && roles.length > 0 && !roles.includes(user.access_level)) {
         return res.status(403).json({ error: 'Insufficient permissions' });
       }
       next();
@@ -1398,74 +1503,112 @@ function requireAuth(roles) {
   };
 }
 
+function toAuthUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    accessLevel: user.access_level,
+    department: user.department || '',
+    initials: user.initials || '',
+    color: user.color || 'bg-teal-600',
+    subscriptionStatus: user.subscription_status || 'active',
+    trialEndsAt: user.trial_ends_at || null,
+    trialDaysRemaining: publicUser(user)?.trialDaysRemaining ?? null,
+  };
+}
+
+function issueAuthResponse(res, user) {
+  const payload = {
+    userId: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    accessLevel: user.access_level,
+    department: user.department,
+    initials: user.initials,
+    color: user.color,
+    subscriptionStatus: user.subscription_status || 'active',
+  };
+  const expiresInSeconds = getTokenTtlSeconds(user);
+  const token = jwt.sign(payload, getJwtSecret(), { expiresIn: expiresInSeconds });
+  res.json({ token, user: toAuthUser(user) });
+}
+
+function getTokenTtlSeconds(user) {
+  const defaultTtlSeconds = 8 * 60 * 60;
+  if (user.subscription_status !== 'trialing' || !user.trial_ends_at) {
+    return defaultTtlSeconds;
+  }
+
+  const secondsUntilTrialEnds = Math.floor((new Date(user.trial_ends_at).getTime() - Date.now()) / 1000);
+  return Math.max(1, Math.min(defaultTtlSeconds, secondsUntilTrialEnds));
+}
+
+// POST /api/auth/register - create a 30-day trial account
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password } = req.body || {};
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email and password are required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  if (await getUserByEmail(email)) {
+    return res.status(409).json({ error: 'Email address is already in use' });
+  }
+
+  try {
+    const user = await createTrialUser({ name, email, password });
+    issueAuthResponse(res, await getUserById(user.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/auth/login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
-  const user = getUserByEmail(email);
+  const user = await getUserByEmail(email);
   if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
-  const payload = {
-    userId:      user.id,
-    name:        user.name,
-    email:       user.email,
-    role:        user.role,
-    accessLevel: user.access_level,
-    department:  user.department,
-    initials:    user.initials,
-    color:       user.color,
-  };
-  const token = jwt.sign(payload, getJwtSecret(), { expiresIn: '8h' });
-  res.json({
-    token,
-    user: {
-      id:          user.id,
-      name:        user.name,
-      email:       user.email,
-      role:        user.role,
-      accessLevel: user.access_level,
-      department:  user.department  || '',
-      initials:    user.initials    || '',
-      color:       user.color       || 'bg-teal-600',
-    },
-  });
+  if (isUserTrialExpired(user)) {
+    return res.status(402).json({ error: 'Your 30-day trial has ended. Contact Nyota Health to activate your account.' });
+  }
+  issueAuthResponse(res, user);
 });
 
 // GET /api/auth/me  – validate stored token and return current user
-app.get('/api/auth/me', requireAuth([]), (req, res) => {
-  const user = getUserById(req.user.userId);
+app.get('/api/auth/me', requireAuth([]), async (req, res) => {
+  const user = await getUserById(req.user.userId);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({
-    id:          user.id,
-    name:        user.name,
-    email:       user.email,
-    role:        user.role,
-    accessLevel: user.access_level,
-    department:  user.department  || '',
-    initials:    user.initials    || '',
-    color:       user.color       || 'bg-teal-600',
-  });
+  if (isUserTrialExpired(user)) {
+    return res.status(402).json({ error: 'Your 30-day trial has ended. Contact Nyota Health to activate your account.' });
+  }
+  res.json(toAuthUser(user));
 });
 
 // GET /api/users  – list all users (admin + supervisor)
-app.get('/api/users', requireAuth(['admin', 'supervisor']), (req, res) => {
-  res.json(getAllUsers());
+app.get('/api/users', requireAuth(['admin', 'supervisor']), async (req, res) => {
+  res.json(await getAllUsers());
 });
 
 // POST /api/users  – create user (admin only)
-app.post('/api/users', requireAuth(['admin']), (req, res) => {
+app.post('/api/users', requireAuth(['admin']), async (req, res) => {
   const { name, email, password, role, accessLevel, department, initials, color } = req.body || {};
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'name, email, password and role are required' });
   }
-  if (getUserByEmail(email)) {
+  if (await getUserByEmail(email)) {
     return res.status(409).json({ error: 'Email address is already in use' });
   }
   try {
-    const user = createUser({ name, email, password, role, accessLevel, department, initials, color });
+    const user = await createUser({ name, email, password, role, accessLevel, department, initials, color });
     res.status(201).json(user);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1473,18 +1616,18 @@ app.post('/api/users', requireAuth(['admin']), (req, res) => {
 });
 
 // PUT /api/users/:id  – update user (admin only)
-app.put('/api/users/:id', requireAuth(['admin']), (req, res) => {
-  const user = updateUser(req.params.id, req.body || {});
+app.put('/api/users/:id', requireAuth(['admin']), async (req, res) => {
+  const user = await updateUser(req.params.id, req.body || {});
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json(user);
 });
 
 // DELETE /api/users/:id  – soft-delete user (admin only)
-app.delete('/api/users/:id', requireAuth(['admin']), (req, res) => {
+app.delete('/api/users/:id', requireAuth(['admin']), async (req, res) => {
   if (req.params.id === req.user.userId) {
     return res.status(400).json({ error: 'You cannot delete your own account' });
   }
-  deactivateUser(req.params.id);
+  await deactivateUser(req.params.id);
   res.json({ success: true });
 });
 
@@ -1496,9 +1639,9 @@ app.delete('/api/users/:id', requireAuth(['admin']), (req, res) => {
     'OB/GYN Attending', 'Charge Nurse', 'Care Navigator', 'Clinical Coordinator'];
 
   // GET /api/careforce – list careforce members (any authenticated user)
-  app.get('/api/careforce', requireAuth([]), (req, res) => {
+  app.get('/api/careforce', requireAuth([]), async (req, res) => {
     try {
-      const allUsers = getAllUsers();
+      const allUsers = await getAllUsers();
       const positions = [
         { top: '50%', left: '40%' }, { top: '30%', left: '70%' },
         { top: '65%', left: '25%' }, { top: '20%', left: '60%' },

@@ -87,7 +87,7 @@ const CaseInput: React.FC<CaseInputProps> = ({ onAnalyze, status, initialData })
              </div>
              <div>
                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Connected Source</div>
-                 <div className="text-xs font-bold text-slate-700">Epic EMR (Simulated)</div>
+                 <div className="text-xs font-bold text-slate-700">Epic EMR</div>
              </div>
          </div>
          <div className="flex gap-2">
@@ -163,7 +163,7 @@ const CaseInput: React.FC<CaseInputProps> = ({ onAnalyze, status, initialData })
                     </div>
                 </div>
                 <div>
-                    <label className="input-label text-rose-400">Stat Vitals (Simulated Device)</label>
+                    <label className="input-label text-rose-400">Stat Vitals</label>
                     <input type="text" name="vitals" value={formData.vitals} onChange={handleChange} className="input-field border-rose-200 focus:ring-rose-500 bg-rose-50/10 font-mono text-rose-700 font-bold" placeholder="BP, HR, SpO2" />
                 </div>
                 <div className="bg-emerald-50/50 p-3 rounded-lg border border-emerald-100">
@@ -199,7 +199,7 @@ const CaseInput: React.FC<CaseInputProps> = ({ onAnalyze, status, initialData })
         {activeTab === 'Labs' && (
             <div className="space-y-4 animate-fadeIn">
                 <div className="bg-amber-50 p-4 rounded-lg border border-amber-100 text-xs text-amber-800 mb-2">
-                    <strong className="block mb-1">Simulated Lab Interface</strong>
+                    <strong className="block mb-1">Lab Interface</strong>
                     Paste recent lab values here. The AI will parse Platelets, Liver Enzymes (AST/ALT), Creatinine, and Proteinuria.
                 </div>
                 <div>

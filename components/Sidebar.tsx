@@ -42,6 +42,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChange, selectedMember, currentSession }) => {
   const palette = dashboardTheme;
   const [isExecutiveFolderOpen, setIsExecutiveFolderOpen] = useState(true);
+  const isTrialUser = currentSession?.user.subscriptionStatus === 'trialing';
 
   return (
     <aside className="w-[64px] md:w-[260px] h-screen text-slate-800 flex flex-col flex-shrink-0 transition-all duration-300 border-r z-50" style={{ background: 'linear-gradient(180deg, #f7fbf9, #edf4f0)', borderColor: '#c8d7cf' }}>
@@ -289,8 +290,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
           </div>
           <div className="hidden md:block flex-1 min-w-0">
             <div className="text-[12px] font-black leading-none mb-0.5 truncate" style={{ color: '#1f2f2a' }}>{currentSession?.user.name || 'State Lead'}</div>
-            <div className="text-[9px] font-bold uppercase tracking-widest truncate" style={{ color: palette.muted }}>
-              {currentSession?.user.role === 'State Lead MCO Supervisor' ? 'MCO Supervisor' : 
+            <div className="text-[9px] font-bold uppercase tracking-widest truncate" style={{ color: isTrialUser ? '#b7791f' : palette.muted }}>
+              {isTrialUser ? '30 day trial' :
+               currentSession?.user.role === 'State Lead MCO Supervisor' ? 'MCO Supervisor' : 
                currentSession?.user.role === 'Admin' ? 'System Admin' : 
                currentSession?.user.role}
             </div>

@@ -58,3 +58,6 @@ Notes:
 - The built Vite app is served by Express in production.
 - Render will build directly from the repository Dockerfile.
 
+## Deploy On GCP
+
+For a from-scratch Cloud Run deployment, Secret Manager setup, and the production database/trial-launch checklist, see [docs/gcp-deployment.md](docs/gcp-deployment.md).

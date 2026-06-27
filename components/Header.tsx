@@ -48,6 +48,8 @@ const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch,
     }
   };
 
+  const isTrialUser = currentSession?.user.subscriptionStatus === 'trialing';
+
   return (
     <header className="border-b h-[72px] flex items-center justify-between px-6 sticky top-0 z-40 shadow-sm" style={{ background: 'linear-gradient(180deg, #f8fbf9, #edf4f0)', borderColor: '#cfddd5' }}>
       <div className="flex items-center gap-5">
@@ -112,13 +114,11 @@ const Header: React.FC<HeaderProps> = ({ activePillar, onPillarChange, onSearch,
              <div className="w-px h-8" style={{ backgroundColor: '#c8d7cf' }}></div>
         <div className="flex items-center gap-3">
           <div className="flex flex-col items-end">
-            <span className="text-[10px] font-black" style={{ color: '#1f2f2a' }}>
-              {currentSession?.user.role === 'Admin' ? 'Admin Session' : 
-               currentSession?.user.role === 'State Lead MCO Supervisor' ? 'Supervisor Session' : 
-               'User Session'}
+            <span className="text-[11px] font-black leading-none" style={{ color: '#1f2f2a' }}>
+              {currentSession?.user.name || 'Nyota User'}
             </span>
-            <span className="text-[9px] font-bold uppercase tracking-tighter" style={{ color: '#6f8c83' }}>
-              {currentSession?.user.permissions?.canAccessStatewide ? 'State-Wide Access' : 'Local Access'}
+            <span className="text-[9px] font-bold uppercase tracking-tighter mt-1" style={{ color: isTrialUser ? '#b7791f' : '#6f8c83' }}>
+              {isTrialUser ? '30 day trial' : currentSession?.user.role || 'User Session'}
             </span>
           </div>
           <div className="relative" ref={menuRef}>

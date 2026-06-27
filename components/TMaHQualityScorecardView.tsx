@@ -49,10 +49,9 @@ const TMaHQualityScorecardView: React.FC = () => {
     ).length;
     const smmRate = (smmCases / items.length) * 100;
 
-    // Calculate screening rates (based on available data - using proxy calculations)
-    const pndScreeningRate = Math.min(100, 85 + Math.random() * 15); // Placeholder for actual screening data
-    const pdsScreeningRate = Math.min(100, 75 + Math.random() * 20); // Placeholder for actual screening data
-    const patientVoiceRate = Math.min(100, 80 + Math.random() * 20); // Placeholder for actual patient feedback data
+    const pndScreeningRate = items.length ? (items.filter(item => item.caseData?.pndScreened === true || item.caseData?.pndScreened === 'True').length / items.length) * 100 : 0;
+    const pdsScreeningRate = items.length ? (items.filter(item => item.caseData?.pdsScreened === true || item.caseData?.pdsScreened === 'True').length / items.length) * 100 : 0;
+    const patientVoiceRate = items.length ? (items.filter(item => item.caseData?.patientVoice === true || item.caseData?.patientVoice === 'True').length / items.length) * 100 : 0;
 
     const performanceData = [
       { metric: 'NTSV C-Section', current: Math.round(ntsvRate * 100) / 100, goal: 18, status: ntsvRate <= 18 ? 'success' : ntsvRate <= 22 ? 'warning' : 'at-risk', weight: '30%' },
@@ -76,10 +75,10 @@ const TMaHQualityScorecardView: React.FC = () => {
 
     // Calculate quality benchmarks based on real data
     const clinicalSafety = 100 - smmRate; // Inverse of SMM rate
-    const careEquity = 85 + Math.random() * 10; // Based on diversity metrics if available
-    const accessSpeed = 90 + Math.random() * 8; // Based on appointment timeliness
-    const engagement = 80 + Math.random() * 15; // Based on care plan adherence
-    const dataSync = 95 + Math.random() * 5; // Based on data completeness
+    const careEquity = items.length ? (items.filter(item => item.caseData?.race && item.caseData?.race !== 'Unknown').length / items.length) * 100 : 0;
+    const accessSpeed = items.length ? (items.filter(item => !item.caseData?.transportationBarrier && item.caseData?.transportationAccess !== false).length / items.length) * 100 : 0;
+    const engagement = items.length ? (items.filter(item => item.ppcPre || item.ppcPost).length / items.length) * 100 : 0;
+    const dataSync = items.length ? (items.filter(item => item.caseData?.vitals && item.caseData?.environmental?.zipCode).length / items.length) * 100 : 0;
 
     const qualityBenchmarks = [
       { subject: 'Clinical Safety', A: Math.round(clinicalSafety), B: 85, fullMark: 100 },

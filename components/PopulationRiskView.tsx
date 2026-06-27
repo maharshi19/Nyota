@@ -115,7 +115,12 @@ const PopulationRiskView: React.FC = () => {
       (riskTiers.find(t => t.name === 'Critical')?.value || 0) +
       (riskTiers.find(t => t.name === 'High')?.value || 0);
     const risingRisk = riskTiers.find(t => t.name === 'Rising')?.value || 0;
-    const resourceEfficiency = Math.min(100, 85 + Math.random() * 10); // Placeholder for actual efficiency calculation
+    const resourceReady = items.filter(item =>
+      Number(item.caseData?.healthcareFacilities || 0) > 0 &&
+      item.caseData?.transportationBarrier !== true &&
+      item.caseData?.transportationAccess !== false
+    ).length;
+    const resourceEfficiency = totalLives ? (resourceReady / totalLives) * 100 : 0;
 
     return {
       totalLives,
@@ -145,11 +150,13 @@ const PopulationRiskView: React.FC = () => {
       (item.caseData?.dbp && item.caseData.dbp > 90)
     ).length;
 
-    // Calculate diabetes prevalence (placeholder - would need actual diabetes data)
-    const diabetes = Math.floor(items.length * 0.08); // 8% prevalence estimate
-
-    // Calculate mental health indicators (placeholder)
-    const mentalHealth = Math.floor(items.length * 0.12); // 12% prevalence estimate
+    const diabetes = items.filter(item => item.caseData?.diabetes === true || item.caseData?.diabetes === 'True').length;
+    const mentalHealth = items.filter(item =>
+      item.caseData?.mentalHealth === true ||
+      item.caseData?.mentalHealth === 'True' ||
+      String(item.caseData?.chiefComplaint || '').toLowerCase().includes('depression') ||
+      String(item.caseData?.chiefComplaint || '').toLowerCase().includes('anxiety')
+    ).length;
 
     // Calculate SMM history (based on prev_preeclampsia and other risk factors)
     const smmHistory = items.filter(item => 
@@ -214,19 +221,16 @@ const PopulationRiskView: React.FC = () => {
     // Create CSV data for stratified registry
     const csvData = [
       ['Member ID', 'Name', 'Risk Tier', 'Risk Score', 'Clinical Status', 'Environmental Factors', 'SDOH Status', 'Estimated Savings'],
-      ...riskTiers.flatMap(tier => 
-        // Generate sample data for each tier based on actual counts
-        Array.from({ length: Math.min(tier.value, 50) }, (_, i) => [
-          `MCO-${tier.name.toLowerCase()}-${String(i + 1).padStart(3, '0')}`,
-          `Member ${tier.name} ${i + 1}`,
-          tier.name,
-          Math.floor(Math.random() * 100),
-          tier.description,
-          tier.name === 'Critical' ? 'High AQI, Heat Stress' : tier.name === 'High' ? 'Elevated BP' : 'Moderate',
-          tier.name === 'Critical' ? 'Food Insecurity, Transport Barrier' : 'Stable',
-          `$${Math.floor(Math.random() * 5000) + 1000}`
-        ])
-      )
+      ...itemTierPairs.map(({ item, tier }) => [
+        item.mrn || item.id,
+        item.name,
+        tier,
+        item.riskRank || 0,
+        item.status || 'Unknown',
+        `AQI ${item.caseData?.aqi || item.caseData?.environmental?.airQuality || 'N/A'}, Heat ${item.caseData?.heatIslandIndex || item.caseData?.environmental?.heatIndex || 'N/A'}`,
+        item.caseData?.foodInsecurity || item.caseData?.transportationBarrier ? 'Resource barrier' : 'No recorded barrier',
+        `$${item.estimatedSavings || 0}`
+      ])
     ];
 
     // Convert to CSV string

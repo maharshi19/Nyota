@@ -90,15 +90,15 @@ const ProgrammaticROIView: React.FC = () => {
 
   // Calculate real cost avoidance trend
   const costAvoidanceTrend = useMemo(() => {
-    // Generate trend based on actual data patterns
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    const totalSavings = items.reduce((sum, item) => sum + (item.estimatedSavings || 0), 0);
+    const totalCost = items.length * 400;
     return months.map((month, index) => {
-      const baseCost = 1.0 + (index * 0.1) + Math.random() * 0.2;
-      const baseSavings = 0.5 + (index * 0.3) + Math.random() * 0.4;
+      const share = (index + 1) / months.length;
       return {
         month,
-        cost: Math.round(baseCost * 10) / 10,
-        savings: Math.round(baseSavings * 10) / 10
+        cost: Math.round((totalCost * share / 1000000) * 10) / 10,
+        savings: Math.round((totalSavings * share / 1000000) * 10) / 10
       };
     });
   }, [items]);
@@ -120,8 +120,8 @@ const ProgrammaticROIView: React.FC = () => {
     
     const nicuAvoidance = Math.round((criticalItems / items.length) * 50);
     const cSectionReduction = Math.round((highRiskItems / items.length) * 30);
-    const erDiversion = Math.round(20 + Math.random() * 10);
-    const lengthOfStay = Math.round(10 + Math.random() * 5);
+    const erDiversion = items.filter(item => String(item.triage || '').includes('3 - Urgent')).length;
+    const lengthOfStay = items.filter(item => item.status === 'Stable').length;
 
     return [
       { category: 'NICU Avoidance', value: nicuAvoidance, color: '#10b981' },

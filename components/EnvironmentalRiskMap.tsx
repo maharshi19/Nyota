@@ -346,7 +346,7 @@ const EnvironmentalRiskMap: React.FC<EnvironmentalRiskMapProps> = ({ overlay, vi
       {/* Grid Pattern Background */}
       <div className="absolute inset-0 opacity-[0.05] pointer-events-none" style={{ backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)', backgroundSize: '30px 30px' }}></div>
       
-      {/* Map Content (Simulated Topography) */}
+      {/* Map Content */}
       <svg className="absolute inset-0 w-full h-full opacity-20 pointer-events-none" preserveAspectRatio="none">
         <path d="M0 100 Q 150 150 300 80 T 600 120 T 900 60 V 450 H 0 Z" fill="#d8ece8" />
         <path d="M0 200 Q 200 280 400 200 T 800 300 T 1200 220 V 450 H 0 Z" fill="#eaf4f1" />

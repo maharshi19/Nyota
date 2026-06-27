@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Shield, Users, Activity, AlertTriangle, TrendingUp, Server, Database, Lock, UserCheck, Settings } from 'lucide-react';
 import { UserSession, TeamMember } from '../types';
 import { dashboardTheme } from '../utils/dashboardTheme';
@@ -11,36 +11,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentSession }) => {
   const palette = dashboardTheme;
 
   const [systemMetrics, setSystemMetrics] = useState({
-    activeUsers: 0,
-    totalSessions: 0,
+    activeUsers: currentSession?.isAuthenticated ? 1 : 0,
+    totalSessions: currentSession?.isAuthenticated ? 1 : 0,
     systemLoad: 0,
     errorRate: 0,
     dataProcessed: 0,
-    uptime: 0
+    uptime: 100
   });
 
-  const [recentActivities, setRecentActivities] = useState([
-    { id: 1, action: 'User login', user: 'Dr. Sarah Chen', timestamp: '2 min ago', type: 'auth' },
-    { id: 2, action: 'System backup completed', user: 'System', timestamp: '15 min ago', type: 'system' },
-    { id: 3, action: 'New user created', user: 'Admin', timestamp: '1 hour ago', type: 'user' },
-    { id: 4, action: 'Security alert resolved', user: 'Security Team', timestamp: '2 hours ago', type: 'security' }
-  ]);
-
-  useEffect(() => {
-    // Simulate real-time metrics
-    const interval = setInterval(() => {
-      setSystemMetrics({
-        activeUsers: Math.floor(Math.random() * 50) + 20,
-        totalSessions: Math.floor(Math.random() * 200) + 150,
-        systemLoad: Math.random() * 100,
-        errorRate: Math.random() * 2,
-        dataProcessed: Math.floor(Math.random() * 1000) + 500,
-        uptime: 99.9
-      });
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
+  const [recentActivities] = useState<Array<{ id: number; action: string; user: string; timestamp: string; type: string }>>([]);
 
   const getActivityIcon = (type: string) => {
     switch (type) {

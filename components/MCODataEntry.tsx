@@ -53,7 +53,7 @@ const MCODataEntry: React.FC<MCODataEntryProps> = ({ onDataSubmitted }) => {
 
   const [currentStep, setCurrentStep] = useState(1);
   const [patientData, setPatientData] = useState<Partial<PatientData>>({
-    mcoId: 'MCO_' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+    mcoId: '',
     clinicalData: {},
     environmentalData: {},
     resourceData: {}
@@ -94,7 +94,7 @@ const MCODataEntry: React.FC<MCODataEntryProps> = ({ onDataSubmitted }) => {
       if (response.ok) {
         alert('Data submitted successfully!');
         setPatientData({
-          mcoId: 'MCO_' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+          mcoId: '',
           clinicalData: {},
           environmentalData: {},
           resourceData: {}

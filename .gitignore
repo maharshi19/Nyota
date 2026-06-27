@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+data/nyota.db*
+data/mco-submissions.json
 
 # Editor directories and files
 .vscode/*

@@ -19,6 +19,9 @@ interface ApiUser {
   initials:    string;
   color:       string;
   isActive:    boolean;
+  subscriptionStatus?: string;
+  trialEndsAt?: string | null;
+  trialDaysRemaining?: number | null;
   createdAt:   string;
 }
 
@@ -31,11 +34,13 @@ interface UserFormState {
   department:  string;
   initials:    string;
   color:       string;
+  subscriptionStatus: string;
 }
 
 const BLANK_FORM: UserFormState = {
   name: '', email: '', password: '', role: 'MCO Case Manager',
   accessLevel: 'user', department: '', initials: '', color: 'bg-teal-600',
+  subscriptionStatus: 'active',
 };
 
 const ROLE_OPTIONS = [
@@ -116,6 +121,7 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ currentSession 
       name: user.name, email: user.email, password: '',
       role: user.role, accessLevel: user.accessLevel,
       department: user.department, initials: user.initials, color: user.color,
+      subscriptionStatus: user.subscriptionStatus || 'active',
     });
     setFormError('');
     setShowPw(false);
@@ -192,6 +198,11 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ currentSession 
     }
   };
 
+  const formatTrialEnds = (value?: string | null) => {
+    if (!value) return '';
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
+  };
+
   // ── Reusable form fields ────────────────────────────────────────────────────
   const FormField = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
@@ -253,6 +264,15 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ currentSession 
 
           <FormField label="Department">
             <input type="text" value={formState.department} onChange={e => setFormState(p => ({ ...p, department: e.target.value }))} className={inputClass} placeholder="Clinical Operations" />
+          </FormField>
+
+          <FormField label="Subscription Status">
+            <select value={formState.subscriptionStatus} onChange={e => setFormState(p => ({ ...p, subscriptionStatus: e.target.value }))} className={inputClass}>
+              <option value="active">Active</option>
+              <option value="trialing">Trialing</option>
+              <option value="expired">Expired</option>
+              <option value="canceled">Canceled</option>
+            </select>
           </FormField>
 
           <FormField label="Avatar Color">
@@ -401,9 +421,20 @@ const UserManagementView: React.FC<UserManagementViewProps> = ({ currentSession 
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">{user.department || '—'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-500'}`}>
-                          {user.isActive ? 'Active' : 'Inactive'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex w-fit px-2 py-1 text-xs font-semibold rounded-full ${user.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-500'}`}>
+                            {user.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                          {user.subscriptionStatus === 'trialing' && (
+                            <span className="text-xs text-slate-500">
+                              Trial: {user.trialDaysRemaining ?? 0} days left
+                              {user.trialEndsAt ? `, ends ${formatTrialEnds(user.trialEndsAt)}` : ''}
+                            </span>
+                          )}
+                          {user.subscriptionStatus && user.subscriptionStatus !== 'active' && user.subscriptionStatus !== 'trialing' && (
+                            <span className="text-xs text-amber-700 capitalize">{user.subscriptionStatus}</span>
+                          )}
+                        </div>
                       </td>
                       {isAdmin && (
                         <td className="px-6 py-4 whitespace-nowrap">

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AuthProvider, useAuth } from './AuthContext';
 import LoginPage from './components/LoginPage';
 import { DataProvider } from './DataContext';
@@ -130,27 +130,30 @@ function AppInner() {
   const allMembers = useMemo(() => boardGroups.flatMap(g => g.items), [boardGroups]);
 
   // load data from CSV-backed API on mount — all hooks must be before early returns
+  const refreshBoardData = useCallback(async () => {
+    if (!isAuthenticated) return;
+    const res = await fetch('/api/board');
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    setBoardGroups(data.groups || []);
+    console.log('[App] Data loaded successfully:', data.groups?.length, 'groups');
+  }, [isAuthenticated]);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
-    async function load() {
+    const load = async () => {
       try {
-        const res = await fetch('/api/board');
-        if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json();
-        if (!cancelled) {
-          setBoardGroups(data.groups || []);
-          console.log('[App] Data loaded successfully:', data.groups?.length, 'groups');
-        }
+        await refreshBoardData();
       } catch (e) {
         console.error('[App] failed to load board groups', e);
         if (!cancelled) setTimeout(load, 5000);
       }
-    }
+    };
     load();
     const interval = setInterval(load, 10000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshBoardData]);
 
   // Show loading spinner while checking stored token
   if (isLoading) {
@@ -279,7 +282,7 @@ function AppInner() {
       case 'admin-dashboard': return <AdminDashboard currentSession={currentSession} />;
       case 'user-management': return <UserManagementView team={MOCK_TEAM} currentSession={currentSession} />;
       case 'supervisor-dashboard': return <SupervisorDashboard currentSession={currentSession} boardGroups={boardGroups} />;
-      case 'mco-portal': return <MCOPortal onViewChange={setCurrentView} />;
+      case 'mco-portal': return <MCOPortal onViewChange={setCurrentView} onDataChanged={refreshBoardData} />;
       case 'board':
       default:
         if (boardGroups.length === 0) {

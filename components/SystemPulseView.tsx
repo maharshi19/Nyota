@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Activity, Server, Users, AlertTriangle, CheckCircle, Clock, Zap, Wifi } from 'lucide-react';
 import { dashboardTheme } from '../utils/dashboardTheme';
 
@@ -22,90 +22,16 @@ interface NetworkNode {
 
 const SystemPulseView: React.FC = () => {
   const palette = dashboardTheme;
-  const [metrics, setMetrics] = useState<SystemMetric[]>([]);
-  const [networkNodes, setNetworkNodes] = useState<NetworkNode[]>([]);
+  const [metrics] = useState<SystemMetric[]>([
+    { id: 'response-time', name: 'Avg Response Time', value: 0, status: 'healthy', trend: 'stable', unit: 'ms' },
+    { id: 'active-users', name: 'Active Care Teams', value: 0, status: 'healthy', trend: 'stable', unit: '' },
+    { id: 'system-load', name: 'System Load', value: 0, status: 'healthy', trend: 'stable', unit: '%' },
+    { id: 'error-rate', name: 'Error Rate', value: 0, status: 'healthy', trend: 'stable', unit: '%' },
+    { id: 'data-throughput', name: 'Data Throughput', value: 0, status: 'healthy', trend: 'stable', unit: 'MB/s' },
+    { id: 'uptime', name: 'System Uptime', value: 100, status: 'healthy', trend: 'stable', unit: '%' },
+  ]);
+  const [networkNodes] = useState<NetworkNode[]>([]);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-
-  useEffect(() => {
-    // Simulate real-time system metrics
-    const generateMetrics = () => {
-      const newMetrics: SystemMetric[] = [
-        {
-          id: 'response-time',
-          name: 'Avg Response Time',
-          value: Math.random() * 200 + 50,
-          status: 'healthy',
-          trend: 'stable',
-          unit: 'ms'
-        },
-        {
-          id: 'active-users',
-          name: 'Active Care Teams',
-          value: Math.floor(Math.random() * 50 + 20),
-          status: 'healthy',
-          trend: 'up',
-          unit: ''
-        },
-        {
-          id: 'system-load',
-          name: 'System Load',
-          value: Math.random() * 100,
-          status: Math.random() > 0.8 ? 'warning' : 'healthy',
-          trend: 'stable',
-          unit: '%'
-        },
-        {
-          id: 'error-rate',
-          name: 'Error Rate',
-          value: Math.random() * 5,
-          status: Math.random() > 0.9 ? 'critical' : 'healthy',
-          trend: 'down',
-          unit: '%'
-        },
-        {
-          id: 'data-throughput',
-          name: 'Data Throughput',
-          value: Math.random() * 1000 + 500,
-          status: 'healthy',
-          trend: 'up',
-          unit: 'MB/s'
-        },
-        {
-          id: 'uptime',
-          name: 'System Uptime',
-          value: 99.9,
-          status: 'healthy',
-          trend: 'stable',
-          unit: '%'
-        }
-      ];
-      setMetrics(newMetrics);
-    };
-
-    const generateNetworkNodes = () => {
-      const nodes: NetworkNode[] = [
-        { id: 'tower-1', name: 'Downtown Care Tower', type: 'tower', status: 'online', latency: 12, connections: 45 },
-        { id: 'tower-2', name: 'Suburban Hub', type: 'hub', status: 'online', latency: 18, connections: 32 },
-        { id: 'tower-3', name: 'Rural Network', type: 'tower', status: 'degraded', latency: 45, connections: 12 },
-        { id: 'endpoint-1', name: 'Mobile Care Unit A', type: 'endpoint', status: 'online', latency: 8, connections: 1 },
-        { id: 'endpoint-2', name: 'Home Monitoring B', type: 'endpoint', status: 'offline', latency: 0, connections: 0 },
-        { id: 'hub-1', name: 'Regional Coordination', type: 'hub', status: 'online', latency: 15, connections: 28 }
-      ];
-      setNetworkNodes(nodes);
-    };
-
-    generateMetrics();
-    generateNetworkNodes();
-
-    // Update every 30 seconds
-    const interval = setInterval(() => {
-      generateMetrics();
-      generateNetworkNodes();
-      setLastUpdate(new Date());
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {
