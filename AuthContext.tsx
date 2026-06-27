@@ -112,8 +112,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const timeout = window.setTimeout(logout, msUntilTrialEnds);
-    return () => window.clearTimeout(timeout);
+    const trialEndsAtMs = new Date(user.trialEndsAt).getTime();
+    const maxSafeDelay = 24 * 60 * 60 * 1000;
+    let timeout: number | undefined;
+    const scheduleTrialCheck = () => {
+      const remaining = trialEndsAtMs - Date.now();
+      if (remaining <= 0) {
+        logout();
+        return;
+      }
+      timeout = window.setTimeout(scheduleTrialCheck, Math.min(remaining, maxSafeDelay));
+    };
+    scheduleTrialCheck();
+    return () => {
+      if (timeout) window.clearTimeout(timeout);
+    };
   }, [logout, user?.subscriptionStatus, user?.trialEndsAt]);
 
   // Build a UserSession object from the auth user so App.tsx doesn't change much
