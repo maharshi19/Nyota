@@ -139,6 +139,20 @@ async function initSchema() {
         source text,
         submitted_at timestamptz NOT NULL DEFAULT now()
       );
+
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id text PRIMARY KEY,
+        user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_type text NOT NULL DEFAULT 'team',
+        sender text NOT NULL,
+        name text NOT NULL,
+        text text NOT NULL,
+        message_type text NOT NULL DEFAULT 'message',
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS chat_messages_user_type_created_idx
+        ON chat_messages (user_id, chat_type, created_at);
     `);
     return;
   }
@@ -161,6 +175,21 @@ async function initSchema() {
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
     );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      chat_type TEXT NOT NULL DEFAULT 'team',
+      sender TEXT NOT NULL,
+      name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      message_type TEXT NOT NULL DEFAULT 'message',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS chat_messages_user_type_created_idx
+      ON chat_messages (user_id, chat_type, created_at);
   `);
 
   for (const [column, definition] of [
@@ -440,6 +469,98 @@ export async function saveMcoSubmission(submission) {
     submission.submittedAt || toIso(new Date()),
   ]);
   return true;
+}
+
+function normalizeChatMessage(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    chatType: row.chat_type,
+    sender: row.sender,
+    name: row.name,
+    text: row.text,
+    type: row.message_type,
+    timestamp: row.created_at instanceof Date ? toIso(row.created_at) : row.created_at,
+  };
+}
+
+export async function listChatMessages(userId, chatType = 'team', limit = 50) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+  if (USE_POSTGRES) {
+    const result = await pool.query(`
+      SELECT * FROM (
+        SELECT *
+        FROM chat_messages
+        WHERE user_id=$1 AND chat_type=$2
+        ORDER BY created_at DESC
+        LIMIT $3
+      ) recent
+      ORDER BY created_at ASC
+    `, [userId, chatType, safeLimit]);
+    return result.rows.map(normalizeChatMessage);
+  }
+
+  return sqlite.prepare(`
+    SELECT * FROM (
+      SELECT *
+      FROM chat_messages
+      WHERE user_id=? AND chat_type=?
+      ORDER BY created_at DESC
+      LIMIT ?
+    ) recent
+    ORDER BY created_at ASC
+  `).all(userId, chatType, safeLimit).map(normalizeChatMessage);
+}
+
+export async function saveChatMessage({ userId, chatType = 'team', sender, name, text, type = 'message' }) {
+  const id = crypto.randomUUID();
+  const createdAt = toIso(new Date());
+  const values = [
+    id,
+    userId,
+    chatType,
+    sender,
+    name,
+    text,
+    type,
+    createdAt,
+  ];
+
+  if (USE_POSTGRES) {
+    await pool.query(`
+      INSERT INTO chat_messages (
+        id, user_id, chat_type, sender, name, text, message_type, created_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `, values);
+  } else {
+    sqlite.prepare(`
+      INSERT INTO chat_messages (
+        id, user_id, chat_type, sender, name, text, message_type, created_at
+      )
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(...values);
+  }
+
+  return normalizeChatMessage({
+    id,
+    user_id: userId,
+    chat_type: chatType,
+    sender,
+    name,
+    text,
+    message_type: type,
+    created_at: createdAt,
+  });
+}
+
+export async function clearChatMessages(userId, chatType = 'team') {
+  if (USE_POSTGRES) {
+    await pool.query('DELETE FROM chat_messages WHERE user_id=$1 AND chat_type=$2', [userId, chatType]);
+  } else {
+    sqlite.prepare('DELETE FROM chat_messages WHERE user_id=? AND chat_type=?').run(userId, chatType);
+  }
 }
 
 export const usingPostgres = USE_POSTGRES;

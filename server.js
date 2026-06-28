@@ -23,6 +23,9 @@ import {
   isUserTrialExpired,
   listMcoSubmissions,
   saveMcoSubmission,
+  listChatMessages,
+  saveChatMessage,
+  clearChatMessages,
   usingPostgres,
 } from './db.js';
 
@@ -1392,31 +1395,25 @@ app.get('/api/mco/submissions', (req, res) => {
 
 // ===== END MCO DATA MANAGEMENT =====
 
-// In-memory message store (in production, use database)
-let conversationHistory = [];
+function normalizeChatType(value) {
+  return value === 'ai' ? 'ai' : 'team';
+}
 
-app.post('/api/messaging/send', (req, res) => {
-  const { sender, name, text, type } = req.body;
+app.post('/api/messaging/send', async (req, res) => {
+  const { sender, name, text, type, chatType } = req.body;
   
   if (!text || !sender) {
     return res.status(400).json({ error: 'Message text and sender required' });
   }
 
-  const message = {
-    id: Date.now().toString(),
+  const message = await saveChatMessage({
+    userId: req.currentUser.id,
+    chatType: normalizeChatType(chatType),
     sender: sender,
-    name: name || 'Unknown',
+    name: name || req.currentUser.name || 'Unknown',
     text: text,
-    timestamp: new Date(),
     type: type || 'message'
-  };
-
-  conversationHistory.push(message);
-  
-  // Keep only last 100 messages
-  if (conversationHistory.length > 100) {
-    conversationHistory = conversationHistory.slice(-100);
-  }
+  });
 
   res.json({
     success: true,
@@ -1424,29 +1421,28 @@ app.post('/api/messaging/send', (req, res) => {
   });
 });
 
-app.get('/api/messaging/history', (req, res) => {
+app.get('/api/messaging/history', async (req, res) => {
+  const chatType = normalizeChatType(req.query.chatType);
   res.json({
-    messages: conversationHistory.slice(-50) // Return last 50 messages
+    messages: await listChatMessages(req.currentUser.id, chatType, Number(req.query.limit) || 50)
   });
 });
 
-app.post('/api/messaging/alert', (req, res) => {
+app.post('/api/messaging/alert', async (req, res) => {
   const { patientName, mrn, riskTier, probability } = req.body;
   
   if (!patientName || !riskTier) {
     return res.status(400).json({ error: 'Patient name and risk tier required' });
   }
 
-  const alertMessage = {
-    id: Date.now().toString(),
+  const alertMessage = await saveChatMessage({
+    userId: req.currentUser.id,
+    chatType: 'team',
     sender: 'system',
     name: `Clinical Alert: ${riskTier} Risk`,
     text: `${patientName} (${mrn}) - Risk Tier: ${riskTier} - Probability: ${probability}%`,
-    timestamp: new Date(),
     type: 'clinical-alert'
-  };
-
-  conversationHistory.push(alertMessage);
+  });
 
   res.json({
     success: true,
@@ -1454,8 +1450,8 @@ app.post('/api/messaging/alert', (req, res) => {
   });
 });
 
-app.post('/api/messaging/clear-history', (req, res) => {
-  conversationHistory = [];
+app.post('/api/messaging/clear-history', async (req, res) => {
+  await clearChatMessages(req.currentUser.id, normalizeChatType(req.body?.chatType));
   res.json({ success: true, message: 'Conversation history cleared' });
 });
 

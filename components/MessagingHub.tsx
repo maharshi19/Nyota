@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MessageSquare, Loader, Bot } from 'lucide-react';
+import { Send, MessageSquare, Loader, Bot, Trash2 } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -24,6 +24,8 @@ const MessagingHub: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeChat, setActiveChat] = useState<'team' | 'ai'>('team');
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [error, setError] = useState('');
   const [teamMembers] = useState<TeamMember[]>([
     { id: '1', name: 'Dr. Sarah Chen', role: 'MCO Case Manager', avatar: 'SC', status: 'online' },
     { id: '2', name: 'Mark Davis', role: 'Care Navigator', avatar: 'MD', status: 'online' },
@@ -34,45 +36,37 @@ const MessagingHub: React.FC = () => {
   const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
-    // Load conversation history from backend
+    let cancelled = false;
     const loadHistory = async () => {
+      setHistoryLoading(true);
+      setError('');
       try {
-        const response = await fetch('/api/messaging/history');
+        const response = await fetch(`/api/messaging/history?chatType=${activeChat}`);
+        if (!response.ok) throw new Error(`History endpoint error: ${response.status}`);
         const data = await response.json();
-        if (data.messages && data.messages.length > 0) {
-          const loadedMessages = data.messages.map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp)
-          }));
+        const loadedMessages = (data.messages || []).map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        if (!cancelled) {
           setMessages(loadedMessages);
         }
       } catch (error) {
         console.error('Error loading message history:', error);
-        // Fall back to initial sample messages
-        const initialMessages: Message[] = [
-          {
-            id: '1',
-            sender: 'team',
-            name: 'Dr. Sarah Chen',
-            text: 'Maria Santos risk score increased significantly. We should escalate to high-risk protocol.',
-            timestamp: new Date(Date.now() - 15 * 60000),
-            type: 'message'
-          },
-          {
-            id: '2',
-            sender: 'team',
-            name: 'Mark Davis',
-            text: 'Agree. I\'ll coordinate with the care team and schedule a follow-up call.',
-            timestamp: new Date(Date.now() - 10 * 60000),
-            type: 'message'
-          }
-        ];
-        setMessages(initialMessages);
+        if (!cancelled) {
+          setMessages([]);
+          setError('Could not load your chat history. Please refresh and try again.');
+        }
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
       }
     };
     
     loadHistory();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChat]);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     const container = messagesContainerRef.current;
@@ -110,6 +104,7 @@ const MessagingHub: React.FC = () => {
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
+    setError('');
 
     // Send message to backend
     try {
@@ -117,6 +112,7 @@ const MessagingHub: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          chatType: activeChat,
           sender: 'user',
           name: 'You',
           text: messageText,
@@ -125,6 +121,7 @@ const MessagingHub: React.FC = () => {
       });
     } catch (error) {
       console.error('Error sending message:', error);
+      setError('Message was shown here but could not be saved to your history.');
     }
 
     if (activeChat === 'ai') {
@@ -141,7 +138,8 @@ const MessagingHub: React.FC = () => {
         });
 
         if (!aiRes.ok) {
-          throw new Error(`AI endpoint error: ${aiRes.status}`);
+          const err = await aiRes.json().catch(() => ({}));
+          throw new Error(err.error || `AI endpoint error: ${aiRes.status}`);
         }
 
         const aiData = await aiRes.json();
@@ -161,6 +159,7 @@ const MessagingHub: React.FC = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            chatType: 'ai',
             sender: 'ai',
             name: 'Clinical AI Assistant',
             text: response,
@@ -169,8 +168,12 @@ const MessagingHub: React.FC = () => {
         });
       } catch (error) {
         let errorText = 'I encountered an error processing your request. Please try again.';
-        if (error instanceof Error && error.message.includes('AI endpoint error: 429')) {
+        if (error instanceof Error && error.message.includes('429')) {
           errorText = 'Gemini quota is currently exceeded for this API key. Please wait and retry, or use a key/project with available quota.';
+        } else if (error instanceof Error && error.message.includes('GEMINI_API_KEY')) {
+          errorText = 'The AI assistant is not configured yet. Please add GEMINI_API_KEY in Cloud Run secrets.';
+        } else if (error instanceof Error && error.message) {
+          errorText = error.message;
         }
 
         const errorMessage: Message = {
@@ -182,9 +185,27 @@ const MessagingHub: React.FC = () => {
           type: 'message'
         };
         setMessages(prev => [...prev, errorMessage]);
+        setError(errorText);
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!window.confirm(`Clear your ${activeChat === 'ai' ? 'AI Assistant' : 'Care Team'} chat history?`)) return;
+    setError('');
+    try {
+      const response = await fetch('/api/messaging/clear-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatType: activeChat }),
+      });
+      if (!response.ok) throw new Error(`Clear endpoint error: ${response.status}`);
+      setMessages([]);
+    } catch (error) {
+      console.error('Error clearing message history:', error);
+      setError('Could not clear your chat history. Please try again.');
     }
   };
 
@@ -254,6 +275,15 @@ const MessagingHub: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleClearHistory}
+              disabled={historyLoading || loading || messages.length === 0}
+              className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Clear this chat history"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
             <span className="hidden md:block text-xs font-bold text-slate-500 uppercase tracking-wider">Mode</span>
             <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
               <button
@@ -293,7 +323,9 @@ const MessagingHub: React.FC = () => {
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center">
               <Bot className="w-12 h-12 text-slate-300 mb-4" />
-              <p className="text-slate-500">No messages yet. Start a conversation!</p>
+              <p className="text-slate-500">
+                {historyLoading ? 'Loading chat history...' : 'No messages yet. Start a conversation!'}
+              </p>
             </div>
           ) : (
             messages.map(msg => (
@@ -346,6 +378,11 @@ const MessagingHub: React.FC = () => {
 
         {/* Input */}
         <div className="bg-white border-t border-slate-200 p-4">
+          {error && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               type="text"
