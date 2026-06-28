@@ -30,8 +30,76 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin not allowed'));
+  },
+}));
+
+app.use(express.json({ limit: '1mb' }));
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+  }
+  next();
+});
+
+const publicApiPaths = new Set([
+  '/api/health',
+  '/api/auth/login',
+  '/api/auth/register',
+]);
+
+app.use('/api', (req, res, next) => {
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    const user = req.currentUser || {};
+    console.log(JSON.stringify({
+      type: 'audit',
+      at: new Date().toISOString(),
+      userId: user.id || null,
+      email: user.email || null,
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      ip: req.ip,
+    }));
+  });
+  next();
+});
+
+app.use('/api', (req, res, next) => {
+  if (req.method === 'OPTIONS' || publicApiPaths.has(req.path === '/health' ? '/api/health' : `/api${req.path}`)) {
+    return next();
+  }
+  return requireAuth([])(req, res, next);
+});
 
 function bootstrapGeminiKey() {
   if (process.env.GEMINI_API_KEY) return;

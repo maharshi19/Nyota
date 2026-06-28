@@ -29,6 +29,9 @@ interface AuthContextType {
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextType | null>(null);
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
+const TOKEN_STORAGE_KEY = 'nyota_token';
+const LAST_ACTIVITY_KEY = 'nyota_last_activity';
 
 function readAuthUser(payload: unknown): AuthUser | null {
   if (!payload || typeof payload !== 'object') return null;
@@ -46,17 +49,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Re-hydrate from localStorage on mount
   useEffect(() => {
-    const stored = localStorage.getItem('nyota_token');
+    const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!stored) { setIsLoading(false); return; }
+
+    const lastActivity = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+    if (!lastActivity || Date.now() - lastActivity > SESSION_TIMEOUT_MS) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+      setIsLoading(false);
+      return;
+    }
 
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${stored}` } })
       .then(async r => (r.ok ? readAuthUser(await r.json()) : null))
       .then(userData => {
         if (userData) { setToken(stored); setUser(userData); }
-        else          { localStorage.removeItem('nyota_token'); }
+        else          { localStorage.removeItem(TOKEN_STORAGE_KEY); localStorage.removeItem(LAST_ACTIVITY_KEY); }
       })
-      .catch(() => localStorage.removeItem('nyota_token'))
+      .catch(() => { localStorage.removeItem(TOKEN_STORAGE_KEY); localStorage.removeItem(LAST_ACTIVITY_KEY); })
       .finally(() => setIsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (url.startsWith('/api') || url.startsWith(window.location.origin + '/api')) {
+        const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (stored) {
+          const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+          if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${stored}`);
+          return originalFetch(input, { ...init, headers });
+        }
+      }
+
+      return originalFetch(input, init);
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -73,7 +110,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const newToken = data.token;
     const userData = readAuthUser(data);
     if (!newToken || !userData) throw new Error('Login response was incomplete');
-    localStorage.setItem('nyota_token', newToken);
+    localStorage.setItem(TOKEN_STORAGE_KEY, newToken);
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
     setToken(newToken);
     setUser(userData);
   }, []);
@@ -92,16 +130,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const newToken = data.token;
     const userData = readAuthUser(data);
     if (!newToken || !userData) throw new Error('Signup response was incomplete');
-    localStorage.setItem('nyota_token', newToken);
+    localStorage.setItem(TOKEN_STORAGE_KEY, newToken);
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
     setToken(newToken);
     setUser(userData);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('nyota_token');
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
     setToken(null);
     setUser(null);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let timeout: number | undefined;
+    const resetInactivityTimer = () => {
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+      if (timeout) window.clearTimeout(timeout);
+      timeout = window.setTimeout(logout, SESSION_TIMEOUT_MS);
+    };
+
+    const events = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+    events.forEach((event) => window.addEventListener(event, resetInactivityTimer, { passive: true }));
+    resetInactivityTimer();
+
+    return () => {
+      if (timeout) window.clearTimeout(timeout);
+      events.forEach((event) => window.removeEventListener(event, resetInactivityTimer));
+    };
+  }, [logout, user]);
 
   useEffect(() => {
     if (!user?.trialEndsAt || user.subscriptionStatus !== 'trialing') return;
