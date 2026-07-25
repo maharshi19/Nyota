@@ -26,7 +26,9 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
-  MessageSquare
+  MessageSquare,
+  Upload,
+  FileText
 } from 'lucide-react';
 import { BoardItem, PillarType, UserSession } from '../types';
 import { dashboardTheme } from '../utils/dashboardTheme';
@@ -216,7 +218,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
             />
             <NavItem 
               icon={<Baby className="w-4 h-4" />} 
-              label="Member Birth Intent" 
+              label="Member Care Requests" 
               active={currentView === 'birthplan'} 
               onClick={() => onViewChange('birthplan')}
               subLabel={selectedMember ? `Member: ${selectedMember.name}` : "Collective View"}
@@ -224,13 +226,36 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
             />
             <NavItem 
               icon={<MapPin className="w-4 h-4" />} 
-              label="Field Dispatch Map" 
+              label="Field Map" 
               iconColor={palette.goldSoft}
             />
             <NavItem 
               icon={<HeartHandshake className="w-4 h-4" />} 
-              label="Doula/CHW Connect" 
+              label="Care Connect" 
+              active={currentView === 'messaging'}
+              onClick={() => onViewChange('messaging')}
               iconColor={palette.critical}
+            />
+            <NavItem
+              icon={<Upload className="w-4 h-4" />}
+              label="Upload Member Documents"
+              active={currentView === 'member-documents'}
+              onClick={() => onViewChange('member-documents')}
+              iconColor={palette.tealBright}
+            />
+            <NavItem
+              icon={<FileText className="w-4 h-4" />}
+              label="Chat with my Documents"
+              active={currentView === 'document-chat'}
+              onClick={() => onViewChange('document-chat')}
+              iconColor={palette.teal}
+            />
+            <NavItem
+              icon={<Activity className="w-4 h-4" />}
+              label="System Pulse"
+              active={currentView === 'system-pulse'}
+              onClick={() => onViewChange('system-pulse')}
+              iconColor={palette.teal}
             />
           </>
         )}
@@ -265,6 +290,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
               onClick={() => onViewChange('user-management')}
               iconColor={palette.teal}
             />
+            <NavItem icon={<Settings className="w-4 h-4" />} label="Tower Config" active={currentView === 'tower-config'} onClick={() => onViewChange('tower-config')} />
           </>
         )}
         
@@ -278,8 +304,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activePillar, currentView, onViewChan
           />
         )}
         
-        <NavItem icon={<Activity className="w-4 h-4" />} label="System Pulse" onClick={() => onViewChange('system-pulse')} iconColor={palette.teal} />
-        <NavItem icon={<Settings className="w-4 h-4" />} label="Tower Config" onClick={() => onViewChange('tower-config')} />
       </nav>
 
       {/* Bottom Profile */}

@@ -23,6 +23,7 @@ import ClinicalDiagnosticsView from './components/ClinicalDiagnosticsView';
 import MessagingHub from './components/MessagingHub';
 import SystemPulseView from './components/SystemPulseView';
 import TowerConfigView from './components/TowerConfigView';
+import MemberDocumentsView from './components/MemberDocumentsView';
 import AdminDashboard from './components/AdminDashboard';
 import UserManagementView from './components/UserManagementView';
 import SupervisorDashboard from './components/SupervisorDashboard';
@@ -102,7 +103,7 @@ const MOCK_TEAM: TeamMember[] = [
 
 
 
-type ViewType = 'board' | 'dashboard' | 'equity' | 'facility' | 'support' | 'birthplan' | 'hedis' | 'careforce' | 'stratification' | 'environment-sdoh' | 'roi' | 'quality-scorecard' | 'clinical-diagnostics' | 'messaging' | 'system-pulse' | 'tower-config' | 'high-urgency-feed' | 'clinical-board' | 'admin-dashboard' | 'user-management' | 'supervisor-dashboard';
+type ViewType = 'board' | 'dashboard' | 'equity' | 'facility' | 'support' | 'birthplan' | 'hedis' | 'careforce' | 'stratification' | 'environment-sdoh' | 'roi' | 'quality-scorecard' | 'clinical-diagnostics' | 'messaging' | 'system-pulse' | 'tower-config' | 'high-urgency-feed' | 'clinical-board' | 'admin-dashboard' | 'user-management' | 'supervisor-dashboard' | 'mco-portal' | 'member-documents' | 'document-chat';
 
 function AppInner() {
   const { isLoading, isAuthenticated, session, token, logout } = useAuth();
@@ -266,7 +267,7 @@ function AppInner() {
       case 'support': return <ContinuousSupportView selectedMember={searchedMember} />;
       case 'birthplan': return <BirthPlanPerspectiveView selectedMember={searchedMember} />;
       case 'hedis': return <HEDISReportingView />;
-      case 'careforce': return <CareForceView />;
+      case 'careforce': return <CareForceView onViewChange={setCurrentView} />;
       case 'stratification': return <PopulationRiskView />;
       case 'environment-sdoh': return <EnvironmentalSDOHView />;
       case 'roi': return <ProgrammaticROIView />;
@@ -275,6 +276,8 @@ function AppInner() {
       case 'messaging': return <MessagingHub />;
       case 'system-pulse': return <SystemPulseView />;
       case 'tower-config': return <TowerConfigView />;
+      case 'member-documents': return <MemberDocumentsView mode="upload" />;
+      case 'document-chat': return <MemberDocumentsView mode="chat" />;
       case 'high-urgency-feed': return (
         <div className="flex-1 p-4 h-full overflow-hidden bg-white">
           <ActionFeed items={allMembers} onItemClick={handleItemClick} />

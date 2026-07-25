@@ -9,12 +9,10 @@ import {
   ShieldCheck,
   Zap,
   Activity,
-  MessageSquare,
-  HeartHandshake,
   Baby,
   Navigation,
   Globe,
-  Clock,
+  Radio,
   MoreVertical,
   Star,
   Loader2
@@ -30,7 +28,11 @@ const ROLE_COLORS: Record<string, string> = {
   Other:               '#94a3b8',
 };
 
-const CareForceView: React.FC = () => {
+interface CareForceViewProps {
+  onViewChange?: (view: 'system-pulse') => void;
+}
+
+const CareForceView: React.FC<CareForceViewProps> = ({ onViewChange }) => {
   const { token } = useAuth();
   const [members, setMembers]       = useState<CareForceMember[]>([]);
   const [activities, setActivities] = useState<CareForceActivity[]>([]);
@@ -98,28 +100,26 @@ const CareForceView: React.FC = () => {
           </div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tight">Care Force Command</h2>
           <p className="text-sm text-slate-500 max-w-2xl font-medium leading-relaxed">
-            Real-time synchronization between the MCO and the{' '}
+            Coordination between the MCO and the{' '}
             <span className="text-teal-600 font-bold">"Care Force"</span>—clinicians, advocates, and community health workers executing TMaH benefits.
           </p>
         </div>
         <div className="flex gap-2">
-          <button className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all">
-            <MessageSquare className="w-4 h-4 text-teal-500" />
-            Broadcast Alert
-          </button>
-          <button className="bg-teal-50 text-slate-800 px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 text-xs font-black uppercase tracking-widest hover:bg-teal-100 transition-all">
-            <HeartHandshake className="w-4 h-4 text-teal-400" />
-            Network Expansion
+          <button
+            onClick={() => onViewChange?.('system-pulse')}
+            className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all"
+          >
+            <Radio className="w-4 h-4 text-teal-500" />
+            System Pulse
           </button>
         </div>
       </div>
 
       {/* TOP METRIC RIBBON */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <MetricBox label="Total Network"     value={String(totalForce)}    sub="Active Partners"       icon={<Users className="text-teal-500" />} />
         <MetricBox label="Active Caseload"   value={String(activeCaseload)} sub="Members Supported"    icon={<Baby className="text-teal-600" />} />
         <MetricBox label="Coverage Adequacy" value={`${coverageRatio}%`}   sub="TMaH Target: 90%"     icon={<ShieldCheck className="text-teal-500" />} />
-        <MetricBox label="Network Status"    value={`${activeCount} Active`} sub="Real-time Sync"     icon={<Clock className="text-amber-500" />} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
