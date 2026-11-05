@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { TeamMember, UserSession } from './types';
+import { PillarType, TeamMember, UserSession } from './types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -14,6 +14,8 @@ export interface AuthUser {
   subscriptionStatus?: 'trialing' | 'active' | 'expired' | 'canceled';
   trialEndsAt?: string | null;
   trialDaysRemaining?: number | null;
+  dashboardAccess?: PillarType | null;
+  communityCareAccess?: boolean;
 }
 
 interface AuthContextType {
@@ -202,6 +204,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           subscriptionStatus: user.subscriptionStatus,
           trialEndsAt: user.trialEndsAt,
           trialDaysRemaining: user.trialDaysRemaining,
+          dashboardAccess: user.dashboardAccess,
+          communityCareAccess: user.communityCareAccess,
           permissions: {
             canViewAllData:      user.accessLevel !== 'user',
             canEditUsers:        user.accessLevel === 'admin',

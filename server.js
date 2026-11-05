@@ -5,6 +5,9 @@ import csvParser from 'csv-parser';
 import cors from 'cors';
 import multer from 'multer';
 import XLSX from 'xlsx';
+import crypto from 'crypto';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { Readable } from 'stream';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -26,6 +29,10 @@ import {
   listChatMessages,
   saveChatMessage,
   clearChatMessages,
+  listMemberDocuments,
+  listAccessibleMemberDocumentContent,
+  saveMemberDocument,
+  getAccessibleMemberDocument,
   usingPostgres,
 } from './db.js';
 
@@ -146,6 +153,119 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
+
+const DOCUMENT_KEY_PATH = path.resolve(__dirname, './data/member-document-key');
+const DOCUMENT_TYPES = {
+  '.pdf': { mimeType: 'application/pdf' },
+  '.docx': { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  '.txt': { mimeType: 'text/plain' },
+  '.csv': { mimeType: 'text/csv' },
+};
+
+class DocumentInputError extends Error {}
+
+function getDocumentStorageKey() {
+  if (process.env.DOCUMENT_STORAGE_KEY) {
+    if (!/^[\da-fA-F]{64}$/.test(process.env.DOCUMENT_STORAGE_KEY)) {
+      throw new Error('DOCUMENT_STORAGE_KEY must be exactly 64 hexadecimal characters.');
+    }
+    return Buffer.from(process.env.DOCUMENT_STORAGE_KEY, 'hex');
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DOCUMENT_STORAGE_KEY must be configured in production.');
+  }
+
+  fs.mkdirSync(path.dirname(DOCUMENT_KEY_PATH), { recursive: true, mode: 0o700 });
+  try {
+    const key = fs.readFileSync(DOCUMENT_KEY_PATH);
+    if (key.length !== 32) throw new Error('Local member document key has an invalid length.');
+    return key;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    const key = crypto.randomBytes(32);
+    try {
+      fs.writeFileSync(DOCUMENT_KEY_PATH, key, { flag: 'wx', mode: 0o600 });
+      return key;
+    } catch (writeError) {
+      if (writeError.code !== 'EEXIST') throw writeError;
+      const existingKey = fs.readFileSync(DOCUMENT_KEY_PATH);
+      if (existingKey.length !== 32) throw new Error('Local member document key has an invalid length.');
+      return existingKey;
+    }
+  }
+}
+
+function encryptDocumentData(data) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getDocumentStorageKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  return {
+    iv: iv.toString('hex'),
+    tag: cipher.getAuthTag().toString('hex'),
+    data: encrypted,
+  };
+}
+
+function decryptDocumentData(data, iv, tag) {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', getDocumentStorageKey(), Buffer.from(iv, 'hex'));
+  decipher.setAuthTag(Buffer.from(tag, 'hex'));
+  return Buffer.concat([decipher.update(data), decipher.final()]);
+}
+
+function decryptDocumentMetadata(document) {
+  return JSON.parse(decryptDocumentData(
+    document.metadata_data ?? document.metadataData,
+    document.metadata_iv ?? document.metadataIv,
+    document.metadata_tag ?? document.metadataTag
+  ).toString('utf8'));
+}
+
+async function extractDocumentText(buffer, extension) {
+  let text;
+  if (extension === '.pdf') {
+    let loadingTask;
+    let pdf;
+    try {
+      loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(buffer),
+        isEvalSupported: false,
+        standardFontDataUrl: new URL('./node_modules/pdfjs-dist/standard_fonts/', import.meta.url).href,
+      });
+      pdf = await loadingTask.promise;
+      if (pdf.numPages > 100) throw new Error('PDFs must contain 100 pages or fewer.');
+      const pages = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+        pages.push(content.items.map(item => ('str' in item ? item.str : '')).join(' '));
+      }
+      text = pages.join('\n');
+    } catch (error) {
+      if (error instanceof DocumentInputError) throw error;
+      throw new DocumentInputError(error.message || 'Could not read this PDF.');
+    } finally {
+      if (loadingTask) await loadingTask.destroy();
+    }
+  } else if (extension === '.docx') {
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value;
+    } catch (error) {
+      throw new DocumentInputError(error.message || 'Could not read this Word document.');
+    }
+  } else {
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    } catch {
+      throw new DocumentInputError('This file is not valid UTF-8 text.');
+    }
+  }
+
+  const normalized = text.replace(/\u0000/g, '').trim();
+  if (!normalized) throw new DocumentInputError('No selectable text was found; scanned documents and images are not supported yet.');
+  if (normalized.length > 250_000) throw new DocumentInputError('Extracted text exceeds 250,000 characters. Split the document and upload smaller files.');
+  return normalized;
+}
 
 // Load ML model and metadata
 let mlModel = null;
@@ -525,8 +645,9 @@ function makeBoardGroups(rows) {
     }
     
     const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
-    const name = `Member ${r.member_id.substring(0, 4).toUpperCase()}`;
-    const mrn = `MRN-${String(i + 1000).slice(-5)}`;
+    const memberId = String(r.member_id || `UNKNOWN-${i + 1}`);
+    const name = `Member ${memberId}`;
+    const mrn = `MRN-${memberId}`;
     
     return {
       id: `p-${i}`,
@@ -538,14 +659,28 @@ function makeBoardGroups(rows) {
       assignee: null,
       lastVitals,
       updatesCount: event72h ? 3 : 0,
-      lastUpdated: '5m ago',
+      lastUpdated: r.ts || 'Unknown',
       caseData: {
-        ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
+        patientId: memberId,
         age: r.age ? String(r.age) : 'Unknown',
         gestation: r.gestation || r.gestational_age || 'Unknown',
         parity: r.parity || 'Unknown',
         chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
         vitals: lastVitals,
+        region: r.region,
+        raceEthnicity: r.race_ethnicity,
+        enrollmentDate: r.enrollment_date,
+        pregnancyStartDate: r.pregnancy_start_date,
+        deliveryDate: r.delivery_date,
+        observedAt: r.ts,
+        sbp,
+        dbp,
+        hrv: Number(r.hrv) || undefined,
+        bmi: Number(r.bmi) || undefined,
+        aqi,
+        ruleScore,
+        eventWithin72h: event72h,
+        heatIslandIndex: Number(r.heat_island_index) || 0,
         environmental: {
           zipCode: r.zip || 'Unknown',
           airQuality: aqi.toString(),
@@ -1203,8 +1338,8 @@ async function buildAggregatedDataPayload() {
 
     return {
       id: submission.id,
-      name: submission.name || `Patient ${submission.patientId}`,
-      mrn: `MCO-${submission.patientId}`,
+      name: submission.name || `Member ${submission.patientId}`,
+      mrn: `MRN-${submission.patientId}`,
       status,
       triage: sbp >= 160 || status === 'Critical' ? '2 - Emergent' : sbp >= 140 || status === 'Reviewing' ? '3 - Urgent' : '4 - Less Urgent',
       riskRank: Math.round(ml.probability),
@@ -1213,13 +1348,13 @@ async function buildAggregatedDataPayload() {
       updatesCount: status === 'Critical' ? 2 : 0,
       lastUpdated: submittedDate ? submittedDate.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Just submitted',
       caseData: {
-        ssn: `MCO-${submission.patientId}`,
         patientId: submission.patientId,
         age: String(submission.age || 'Unknown'),
         gestation: 'Unknown',
         parity: 'Unknown',
         chiefComplaint: clinical.smmCondition || 'MCO Submission',
         vitals,
+        observedAt: submission.submittedAt,
         sbp,
         dbp,
         map,
@@ -1292,8 +1427,9 @@ async function buildAggregatedDataPayload() {
     }
 
     const lastVitals = `BP ${sbp.toFixed(0)}/${dbp.toFixed(0)} | AQI ${aqi.toFixed(0)}`;
-    const name = `Member ${r.member_id.substring(0, 4).toUpperCase()}`;
-    const mrn = `MRN-${String(i + 1000).slice(-5)}`;
+    const memberId = String(r.member_id || `UNKNOWN-${i + 1}`);
+    const name = `Member ${memberId}`;
+    const mrn = `MRN-${memberId}`;
 
     return {
       id: `csv-${i}`,
@@ -1305,19 +1441,28 @@ async function buildAggregatedDataPayload() {
       assignee: null,
       lastVitals,
       updatesCount: event72h ? 3 : 0,
-      lastUpdated: '5m ago',
+      lastUpdated: r.ts || 'Unknown',
       caseData: {
-        ssn: `5${String(i).padStart(2, '0')}-XX-XXXX`,
+        patientId: memberId,
         age: r.age ? String(r.age) : 'Unknown',
         gestation: r.gestation || r.gestational_age || 'Unknown',
         parity: r.parity || 'Unknown',
         chiefComplaint: sbp > 160 ? 'Elevated blood pressure' : sbp > 140 ? 'Headache' : 'Routine visit',
         vitals: lastVitals,
+        region: r.region,
+        raceEthnicity: r.race_ethnicity,
+        enrollmentDate: r.enrollment_date,
+        pregnancyStartDate: r.pregnancy_start_date,
+        deliveryDate: r.delivery_date,
+        observedAt: r.ts,
         sbp,
         dbp,
+        hrv: Number(r.hrv) || undefined,
+        bmi: Number(r.bmi) || undefined,
         aqi,
         ruleScore,
         eventWithin72h: event72h,
+        heatIslandIndex: Number(r.heat_island_index) || 0,
         environmental: {
           zipCode: r.zip || 'Unknown',
           airQuality: aqi.toString(),
@@ -1400,18 +1545,18 @@ function normalizeChatType(value) {
 }
 
 app.post('/api/messaging/send', async (req, res) => {
-  const { sender, name, text, type, chatType } = req.body;
-  
-  if (!text || !sender) {
-    return res.status(400).json({ error: 'Message text and sender required' });
+  const { name, text, type, chatType: requestedChatType } = req.body;
+  const normalizedChatType = normalizeChatType(requestedChatType);
+  if (typeof text !== 'string' || !text.trim() || text.length > 4000) {
+    return res.status(400).json({ error: 'Message text is required and must be 4,000 characters or fewer.' });
   }
 
   const message = await saveChatMessage({
     userId: req.currentUser.id,
-    chatType: normalizeChatType(chatType),
-    sender: sender,
-    name: name || req.currentUser.name || 'Unknown',
-    text: text,
+    chatType: normalizedChatType,
+    sender: normalizedChatType === 'team' ? 'team' : (req.body?.sender || 'user'),
+    name: normalizedChatType === 'team' ? req.currentUser.name : (name || req.currentUser.name || 'Unknown'),
+    text: text.trim(),
     type: type || 'message'
   });
 
@@ -1453,6 +1598,230 @@ app.post('/api/messaging/alert', async (req, res) => {
 app.post('/api/messaging/clear-history', async (req, res) => {
   await clearChatMessages(req.currentUser.id, normalizeChatType(req.body?.chatType));
   res.json({ success: true, message: 'Conversation history cleared' });
+});
+
+app.get('/api/member-documents/recipients', async (req, res) => {
+  try {
+    const users = await getAllUsers();
+    const recipients = users
+      .filter(user => user.isActive && user.role !== 'Admin' && user.id !== req.currentUser.id)
+      .map(({ id, name, role, department }) => ({ id, name, role, department }));
+    res.json({ recipients });
+  } catch (error) {
+    console.error('Member document recipients failed to load:', error);
+    res.status(500).json({ error: 'Could not load active care-team users.' });
+  }
+});
+
+app.get('/api/member-documents', async (req, res) => {
+  try {
+    const documents = await listMemberDocuments(req.currentUser.id);
+    res.json({
+      documents: documents.map(document => ({
+        id: document.id,
+        ...decryptDocumentMetadata(document),
+        mimeType: document.mimeType,
+        byteSize: document.byteSize,
+        uploadedAt: document.uploadedAt,
+        uploaderName: document.uploaderName,
+      })),
+    });
+  } catch (error) {
+    console.error('Member document list failed to load:', error);
+    res.status(500).json({ error: 'Could not load member documents.' });
+  }
+});
+
+app.post('/api/member-documents/upload', (req, res, next) => {
+  upload.single('file')(req, res, error => {
+    if (!error) return next();
+    const tooLarge = error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE';
+    res.status(tooLarge ? 413 : 400).json({
+      error: tooLarge ? 'Files must be 10 MB or smaller.' : error.message || 'Could not receive the uploaded file.',
+    });
+  });
+}, async (req, res) => {
+  const file = req.file;
+  const memberRef = typeof req.body?.memberRef === 'string' ? req.body.memberRef.trim() : '';
+  if (!file) return res.status(400).json({ error: 'Choose a document to upload.' });
+  if (!memberRef || memberRef.length > 120) {
+    return res.status(400).json({ error: 'Enter a member name or ID (up to 120 characters).' });
+  }
+
+  const extension = path.extname(file.originalname).toLowerCase();
+  const documentType = DOCUMENT_TYPES[extension];
+  if (!documentType) {
+    return res.status(415).json({ error: 'Upload a PDF, DOCX, TXT, or CSV file.' });
+  }
+  const acceptedMimeTypes = [documentType.mimeType, 'application/octet-stream'];
+  if (extension === '.csv') acceptedMimeTypes.push('application/vnd.ms-excel');
+  if (!acceptedMimeTypes.includes(file.mimetype)) {
+    return res.status(415).json({ error: 'The file contents do not match the selected document type.' });
+  }
+  if (extension === '.pdf' && !file.buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+    return res.status(400).json({ error: 'This file is not a valid PDF.' });
+  }
+  if (extension === '.docx' && !file.buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
+    return res.status(400).json({ error: 'This file is not a valid DOCX document.' });
+  }
+
+  let sharedWith = [];
+  try {
+    sharedWith = req.body?.sharedWith ? JSON.parse(req.body.sharedWith) : [];
+  } catch {
+    return res.status(400).json({ error: 'The selected sharing list is invalid.' });
+  }
+  if (!Array.isArray(sharedWith) || sharedWith.length > 50 || sharedWith.some(id => typeof id !== 'string')) {
+    return res.status(400).json({ error: 'Choose up to 50 active care-team users to share with.' });
+  }
+  const recipientIds = [...new Set(sharedWith)].filter(id => id !== req.currentUser.id);
+  try {
+    const users = await getAllUsers();
+    const activeUserIds = new Set(users
+      .filter(user => user.isActive && user.role !== 'Admin')
+      .map(user => user.id));
+    if (recipientIds.some(id => !activeUserIds.has(id))) {
+      return res.status(400).json({ error: 'One or more selected users are no longer active.' });
+    }
+
+    const extractedText = await extractDocumentText(file.buffer, extension);
+    const encryptedFile = encryptDocumentData(file.buffer);
+    const encryptedText = encryptDocumentData(Buffer.from(extractedText, 'utf8'));
+    const safeFileName = path.basename(file.originalname)
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .slice(0, 180) || `member-document${extension}`;
+    const encryptedMetadata = encryptDocumentData(Buffer.from(JSON.stringify({
+      fileName: safeFileName,
+      memberRef,
+    }), 'utf8'));
+    const document = {
+      id: crypto.randomUUID(),
+      uploadedBy: req.currentUser.id,
+      memberRef: 'encrypted',
+      fileName: `member-document${extension}`,
+      mimeType: documentType.mimeType,
+      byteSize: file.size,
+      metadataIv: encryptedMetadata.iv,
+      metadataTag: encryptedMetadata.tag,
+      metadataData: encryptedMetadata.data,
+      contentIv: encryptedFile.iv,
+      contentTag: encryptedFile.tag,
+      contentData: encryptedFile.data,
+      textIv: encryptedText.iv,
+      textTag: encryptedText.tag,
+      textData: encryptedText.data,
+      createdAt: new Date().toISOString(),
+    };
+    await saveMemberDocument(document, recipientIds);
+    res.status(201).json({
+      document: {
+        id: document.id,
+        memberRef,
+        fileName: safeFileName,
+        mimeType: document.mimeType,
+        byteSize: document.byteSize,
+        uploadedAt: document.createdAt,
+        uploaderName: req.currentUser.name,
+      },
+    });
+  } catch (error) {
+    if (error instanceof DocumentInputError) {
+      return res.status(422).json({ error: error.message });
+    }
+    console.error('Member document upload failed:', error);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' && !process.env.DOCUMENT_STORAGE_KEY
+        ? 'Secure document storage is not configured. Contact your administrator.'
+        : 'The document could not be stored securely.',
+    });
+  }
+});
+
+app.get('/api/member-documents/:id/download', async (req, res) => {
+  try {
+    const document = await getAccessibleMemberDocument(req.params.id, req.currentUser.id);
+    if (!document) return res.status(404).json({ error: 'Document not found.' });
+    const content = decryptDocumentData(document.content_data, document.content_iv, document.content_tag);
+    const metadata = decryptDocumentMetadata(document);
+    res.setHeader('Content-Type', document.mime_type);
+    res.setHeader('Content-Length', document.byte_size);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(metadata.fileName)}`);
+    res.send(content);
+  } catch (error) {
+    console.error('Member document download failed:', error);
+    res.status(500).json({ error: 'The document could not be opened.' });
+  }
+});
+
+app.post('/api/member-documents/chat', async (req, res) => {
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+  const documentId = req.body?.documentId === 'all' ? null : req.body?.documentId;
+  if (!question || question.length > 1000) {
+    return res.status(400).json({ error: 'Enter a question up to 1,000 characters.' });
+  }
+  if (documentId !== null && typeof documentId !== 'string') {
+    return res.status(400).json({ error: 'Choose a valid document.' });
+  }
+
+  try {
+    const documents = documentId
+      ? [await getAccessibleMemberDocument(documentId, req.currentUser.id)].filter(Boolean)
+      : await listAccessibleMemberDocumentContent(req.currentUser.id, 100);
+    if (documentId && documents.length === 0) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+    if (documents.length === 0) {
+      return res.json({
+        answer: 'No documents are available to you yet. Upload a document or ask its owner to share it with you.',
+        matches: [],
+        documentsSearched: 0,
+      });
+    }
+
+    const stopWords = new Set(['the', 'and', 'for', 'are', 'was', 'were', 'with', 'from', 'that', 'this', 'have', 'has', 'what', 'when', 'where', 'which', 'who', 'how', 'can', 'could', 'would', 'should', 'about', 'into', 'does', 'did', 'please', 'show', 'find', 'tell', 'me']);
+    const terms = [...new Set(question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])]
+      .filter(term => !stopWords.has(term));
+    if (terms.length === 0) {
+      return res.status(400).json({ error: 'Please include a specific name, topic, or phrase in your question.' });
+    }
+
+    const matches = [];
+    for (const document of documents) {
+      const metadata = decryptDocumentMetadata(document);
+      const text = decryptDocumentData(document.text_data, document.text_iv, document.text_tag).toString('utf8');
+      const ranked = text.split(/[\r\n.!?]+/)
+        .map(sentence => sentence.trim())
+        .filter(Boolean)
+        .map(sentence => ({
+          sentence,
+          score: terms.reduce((score, term) => score + (sentence.toLowerCase().includes(term) ? 1 : 0), 0),
+        }))
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2);
+      for (const item of ranked) {
+        matches.push({
+          score: item.score,
+          documentId: document.id,
+          fileName: metadata.fileName,
+          memberRef: metadata.memberRef,
+          excerpt: item.sentence.slice(0, 900),
+        });
+      }
+    }
+    matches.sort((a, b) => b.score - a.score);
+    const results = matches.slice(0, 8).map(({ score, ...match }) => match);
+    res.json({
+      answer: results.length
+        ? 'I searched only documents you are allowed to access. These passages best match your question:'
+        : 'I could not find a matching passage in the documents you can access. Try different keywords or choose another document.',
+      matches: results,
+      documentsSearched: documents.length,
+    });
+  } catch (error) {
+    console.error('Member document chat failed:', error);
+    res.status(500).json({ error: 'Could not search the accessible member documents.' });
+  }
 });
 
 app.post('/api/ai/chat', async (req, res) => {
@@ -1580,6 +1949,8 @@ function toAuthUser(user) {
     subscriptionStatus: user.subscription_status || 'active',
     trialEndsAt: user.trial_ends_at || null,
     trialDaysRemaining: publicUser(user)?.trialDaysRemaining ?? null,
+    dashboardAccess: user.dashboard_access || null,
+    communityCareAccess: Boolean(user.community_care_access),
   };
 }
 
@@ -1664,7 +2035,7 @@ app.get('/api/users', requireAuth(['admin', 'supervisor']), async (req, res) => 
 
 // POST /api/users  – create user (admin only)
 app.post('/api/users', requireAuth(['admin']), async (req, res) => {
-  const { name, email, password, role, accessLevel, department, initials, color } = req.body || {};
+  const { name, email, password, role, accessLevel, department, initials, color, dashboardAccess, communityCareAccess } = req.body || {};
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'name, email, password and role are required' });
   }
@@ -1672,7 +2043,10 @@ app.post('/api/users', requireAuth(['admin']), async (req, res) => {
     return res.status(409).json({ error: 'Email address is already in use' });
   }
   try {
-    const user = await createUser({ name, email, password, role, accessLevel, department, initials, color });
+    const user = await createUser({
+      name, email, password, role, accessLevel, department, initials, color,
+      dashboardAccess, communityCareAccess,
+    });
     res.status(201).json(user);
   } catch (err) {
     res.status(500).json({ error: err.message });

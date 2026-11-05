@@ -82,6 +82,8 @@ function sanitize(user) {
     trialStartedAt: u.trial_started_at || null,
     trialEndsAt: u.trial_ends_at || null,
     trialDaysRemaining: getTrialDaysRemaining(u),
+    dashboardAccess: u.dashboard_access || null,
+    communityCareAccess: u.community_care_access === 1 || u.community_care_access === true,
     createdAt: u.created_at,
   };
 }
@@ -124,6 +126,9 @@ async function initSchema() {
         updated_at timestamptz NOT NULL DEFAULT now()
       );
 
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS dashboard_access text;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS community_care_access boolean NOT NULL DEFAULT false;
+
       CREATE TABLE IF NOT EXISTS mco_submissions (
         id text PRIMARY KEY,
         mco_id text NOT NULL,
@@ -153,6 +158,38 @@ async function initSchema() {
 
       CREATE INDEX IF NOT EXISTS chat_messages_user_type_created_idx
         ON chat_messages (user_id, chat_type, created_at);
+
+      CREATE TABLE IF NOT EXISTS member_documents (
+        id text PRIMARY KEY,
+        uploaded_by text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        member_ref text NOT NULL,
+        file_name text NOT NULL,
+        mime_type text NOT NULL,
+        byte_size integer NOT NULL,
+        metadata_iv text NOT NULL,
+        metadata_tag text NOT NULL,
+        metadata_data bytea NOT NULL,
+        content_iv text NOT NULL,
+        content_tag text NOT NULL,
+        content_data bytea NOT NULL,
+        text_iv text NOT NULL,
+        text_tag text NOT NULL,
+        text_data bytea NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+
+      ALTER TABLE member_documents ADD COLUMN IF NOT EXISTS metadata_iv text;
+      ALTER TABLE member_documents ADD COLUMN IF NOT EXISTS metadata_tag text;
+      ALTER TABLE member_documents ADD COLUMN IF NOT EXISTS metadata_data bytea;
+
+      CREATE TABLE IF NOT EXISTS member_document_shares (
+        document_id text NOT NULL REFERENCES member_documents(id) ON DELETE CASCADE,
+        user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        PRIMARY KEY (document_id, user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS member_document_shares_user_idx
+        ON member_document_shares (user_id, document_id);
     `);
     return;
   }
@@ -190,12 +227,56 @@ async function initSchema() {
 
     CREATE INDEX IF NOT EXISTS chat_messages_user_type_created_idx
       ON chat_messages (user_id, chat_type, created_at);
+
+    CREATE TABLE IF NOT EXISTS member_documents (
+      id TEXT PRIMARY KEY,
+      uploaded_by TEXT NOT NULL,
+      member_ref TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      metadata_iv TEXT NOT NULL,
+      metadata_tag TEXT NOT NULL,
+      metadata_data BLOB NOT NULL,
+      content_iv TEXT NOT NULL,
+      content_tag TEXT NOT NULL,
+      content_data BLOB NOT NULL,
+      text_iv TEXT NOT NULL,
+      text_tag TEXT NOT NULL,
+      text_data BLOB NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+      FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS member_document_shares (
+      document_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      PRIMARY KEY (document_id, user_id),
+      FOREIGN KEY (document_id) REFERENCES member_documents(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS member_document_shares_user_idx
+      ON member_document_shares (user_id, document_id);
   `);
+
+  for (const [column, definition] of [
+    ['metadata_iv', 'TEXT'],
+    ['metadata_tag', 'TEXT'],
+    ['metadata_data', 'BLOB'],
+  ]) {
+    const columns = sqlite.prepare('PRAGMA table_info(member_documents)').all();
+    if (!columns.some((col) => col.name === column)) {
+      sqlite.exec(`ALTER TABLE member_documents ADD COLUMN ${column} ${definition}`);
+    }
+  }
 
   for (const [column, definition] of [
     ['subscription_status', "TEXT NOT NULL DEFAULT 'active'"],
     ['trial_started_at', 'TEXT'],
     ['trial_ends_at', 'TEXT'],
+    ['dashboard_access', 'TEXT'],
+    ['community_care_access', 'INTEGER NOT NULL DEFAULT 0'],
   ]) {
     const columns = sqlite.prepare('PRAGMA table_info(users)').all();
     if (!columns.some((col) => col.name === column)) {
@@ -250,7 +331,7 @@ async function seedUsers() {
   console.log('Careforce seed members ensured');
 }
 
-async function insertUserRow({ name, email, password, role, accessLevel, department, initials, color, subscriptionStatus = 'active', trialStartedAt = null, trialEndsAt = null }) {
+async function insertUserRow({ name, email, password, role, accessLevel, department, initials, color, subscriptionStatus = 'active', trialStartedAt = null, trialEndsAt = null, dashboardAccess = null, communityCareAccess = false }) {
   const id = crypto.randomUUID();
   const hash = bcrypt.hashSync(password, 10);
   const ini = initials || name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
@@ -267,23 +348,25 @@ async function insertUserRow({ name, email, password, role, accessLevel, departm
     subscriptionStatus,
     trialStartedAt,
     trialEndsAt,
+    dashboardAccess,
+    USE_POSTGRES ? Boolean(communityCareAccess) : communityCareAccess ? 1 : 0,
   ];
 
   if (USE_POSTGRES) {
     await pool.query(`
       INSERT INTO users (
         id, name, email, password_hash, role, access_level, department, initials, color,
-        subscription_status, trial_started_at, trial_ends_at
+        subscription_status, trial_started_at, trial_ends_at, dashboard_access, community_care_access
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
     `, values);
   } else {
     sqlite.prepare(`
       INSERT INTO users (
         id, name, email, password_hash, role, access_level, department, initials, color,
-        subscription_status, trial_started_at, trial_ends_at
+        subscription_status, trial_started_at, trial_ends_at, dashboard_access, community_care_access
       )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(...values);
   }
 
@@ -314,8 +397,11 @@ export async function getAllUsers() {
   return sqlite.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(sanitize);
 }
 
-export async function createUser({ name, email, password, role, accessLevel, department, initials, color }) {
-  const id = await insertUserRow({ name, email, password, role, accessLevel, department, initials, color, subscriptionStatus: 'active' });
+export async function createUser({ name, email, password, role, accessLevel, department, initials, color, dashboardAccess, communityCareAccess }) {
+  const id = await insertUserRow({
+    name, email, password, role, accessLevel, department, initials, color,
+    dashboardAccess, communityCareAccess, subscriptionStatus: 'active',
+  });
   return sanitize(await getUserById(id));
 }
 
@@ -365,6 +451,8 @@ export async function updateUser(id, updates) {
     ['subscriptionStatus', 'subscription_status', (v) => v],
     ['trialStartedAt', 'trial_started_at', (v) => v],
     ['trialEndsAt', 'trial_ends_at', (v) => v],
+    ['dashboardAccess', 'dashboard_access', (v) => v || null],
+    ['communityCareAccess', 'community_care_access', (v) => (USE_POSTGRES ? Boolean(v) : v ? 1 : 0)],
   ];
 
   const fields = [];
@@ -487,6 +575,45 @@ function normalizeChatMessage(row) {
 
 export async function listChatMessages(userId, chatType = 'team', limit = 50) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+  if (chatType === 'team') {
+    const postgresQuery = `
+      SELECT * FROM (
+        SELECT m.*
+        FROM chat_messages m
+        JOIN users author ON author.id = m.user_id
+        WHERE m.chat_type = $2 AND EXISTS (
+          SELECT 1 FROM users viewer
+          WHERE viewer.id = $1
+            AND viewer.department = author.department
+            AND (viewer.department NOT IN ('', 'Trial') OR viewer.id = author.id)
+        )
+        ORDER BY m.created_at DESC
+        LIMIT $3
+      ) recent
+      ORDER BY created_at ASC
+    `;
+    const sqliteQuery = `
+      SELECT * FROM (
+        SELECT m.*
+        FROM chat_messages m
+        JOIN users author ON author.id = m.user_id
+        WHERE m.chat_type = ? AND EXISTS (
+          SELECT 1 FROM users viewer
+          WHERE viewer.id = ?
+            AND viewer.department = author.department
+            AND (viewer.department NOT IN ('', 'Trial') OR viewer.id = author.id)
+        )
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      ) recent
+      ORDER BY created_at ASC
+    `;
+    const rows = USE_POSTGRES
+      ? (await pool.query(postgresQuery, [userId, chatType, safeLimit])).rows
+      : sqlite.prepare(sqliteQuery).all(chatType, userId, safeLimit);
+    return rows.map(normalizeChatMessage);
+  }
+
   if (USE_POSTGRES) {
     const result = await pool.query(`
       SELECT * FROM (
@@ -561,6 +688,168 @@ export async function clearChatMessages(userId, chatType = 'team') {
   } else {
     sqlite.prepare('DELETE FROM chat_messages WHERE user_id=? AND chat_type=?').run(userId, chatType);
   }
+}
+
+export async function listMemberDocuments(userId, limit = 100) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  const query = `
+    SELECT d.id, d.mime_type, d.byte_size, d.created_at,
+      d.metadata_iv, d.metadata_tag, d.metadata_data,
+      u.name AS uploader_name
+    FROM member_documents d
+    JOIN users u ON u.id = d.uploaded_by
+    WHERE d.uploaded_by = $1 OR EXISTS (
+      SELECT 1 FROM member_document_shares s
+      WHERE s.document_id = d.id AND s.user_id = $1
+    )
+    ORDER BY d.created_at DESC
+    LIMIT $2
+  `;
+  const sqliteQuery = `
+    SELECT d.id, d.mime_type, d.byte_size, d.created_at,
+      d.metadata_iv, d.metadata_tag, d.metadata_data,
+      u.name AS uploader_name
+    FROM member_documents d
+    JOIN users u ON u.id = d.uploaded_by
+    WHERE d.uploaded_by = ? OR EXISTS (
+      SELECT 1 FROM member_document_shares s
+      WHERE s.document_id = d.id AND s.user_id = ?
+    )
+    ORDER BY d.created_at DESC
+    LIMIT ?
+  `;
+  const rows = USE_POSTGRES
+    ? (await pool.query(query, [userId, safeLimit])).rows
+    : sqlite.prepare(sqliteQuery).all(userId, userId, safeLimit);
+  return rows.map((row) => ({
+    id: row.id,
+    mimeType: row.mime_type,
+    byteSize: row.byte_size,
+    uploadedAt: row.created_at instanceof Date ? toIso(row.created_at) : row.created_at,
+    uploaderName: row.uploader_name,
+    metadataIv: row.metadata_iv,
+    metadataTag: row.metadata_tag,
+    metadataData: row.metadata_data,
+  }));
+}
+
+export async function listAccessibleMemberDocumentContent(userId, limit = 100) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  const query = `
+    SELECT d.*
+    FROM member_documents d
+    WHERE d.uploaded_by = $1 OR EXISTS (
+      SELECT 1 FROM member_document_shares s
+      WHERE s.document_id = d.id AND s.user_id = $1
+    )
+    ORDER BY d.created_at DESC
+    LIMIT $2
+  `;
+  const sqliteQuery = `
+    SELECT d.*
+    FROM member_documents d
+    WHERE d.uploaded_by = ? OR EXISTS (
+      SELECT 1 FROM member_document_shares s
+      WHERE s.document_id = d.id AND s.user_id = ?
+    )
+    ORDER BY d.created_at DESC
+    LIMIT ?
+  `;
+  return USE_POSTGRES
+    ? (await pool.query(query, [userId, safeLimit])).rows
+    : sqlite.prepare(sqliteQuery).all(userId, userId, safeLimit);
+}
+
+export async function saveMemberDocument(document, recipientIds) {
+  const values = [
+    document.id,
+    document.uploadedBy,
+    document.memberRef,
+    document.fileName,
+    document.mimeType,
+    document.byteSize,
+    document.metadataIv,
+    document.metadataTag,
+    document.metadataData,
+    document.contentIv,
+    document.contentTag,
+    document.contentData,
+    document.textIv,
+    document.textTag,
+    document.textData,
+    document.createdAt,
+  ];
+
+  if (USE_POSTGRES) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`
+        INSERT INTO member_documents (
+          id, uploaded_by, member_ref, file_name, mime_type, byte_size,
+          metadata_iv, metadata_tag, metadata_data,
+          content_iv, content_tag, content_data, text_iv, text_tag, text_data, created_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      `, values);
+      for (const userId of recipientIds) {
+        await client.query(
+          'INSERT INTO member_document_shares (document_id, user_id) VALUES ($1,$2)',
+          [document.id, userId]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return;
+  }
+
+  const insert = sqlite.transaction(() => {
+    sqlite.prepare(`
+      INSERT INTO member_documents (
+        id, uploaded_by, member_ref, file_name, mime_type, byte_size,
+        metadata_iv, metadata_tag, metadata_data,
+        content_iv, content_tag, content_data, text_iv, text_tag, text_data, created_at
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(...values);
+    const insertShare = sqlite.prepare(
+      'INSERT INTO member_document_shares (document_id, user_id) VALUES (?,?)'
+    );
+    for (const userId of recipientIds) insertShare.run(document.id, userId);
+  });
+  insert();
+}
+
+export async function getAccessibleMemberDocument(documentId, userId) {
+  const query = `
+    SELECT d.*
+    FROM member_documents d
+    WHERE d.id = $1 AND (
+      d.uploaded_by = $2 OR EXISTS (
+        SELECT 1 FROM member_document_shares s
+        WHERE s.document_id = d.id AND s.user_id = $2
+      )
+    )
+  `;
+  const sqliteQuery = `
+    SELECT d.*
+    FROM member_documents d
+    WHERE d.id = ? AND (
+      d.uploaded_by = ? OR EXISTS (
+        SELECT 1 FROM member_document_shares s
+        WHERE s.document_id = d.id AND s.user_id = ?
+      )
+    )
+  `;
+  const row = USE_POSTGRES
+    ? (await pool.query(query, [documentId, userId])).rows[0]
+    : sqlite.prepare(sqliteQuery).get(documentId, userId, userId);
+  return row || null;
 }
 
 export const usingPostgres = USE_POSTGRES;

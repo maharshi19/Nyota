@@ -13,6 +13,7 @@ dist-ssr
 *.local
 data/nyota.db*
 data/mco-submissions.json
+data/member-document-key
 
 # Editor directories and files
 .vscode/*

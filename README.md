@@ -39,6 +39,14 @@ The ML assets are included in this repo at `models_senior_v4/`:
 
 Feel free to add additional columns to the CSV and update `server.js`/`types.ts` accordingly.
 
+## Member documents
+
+Member Documents accepts PDF files with selectable text, DOCX, TXT, and CSV files up to 10 MB. Scanned PDFs and images are not OCR'd. Files, extracted text, and identifying metadata are encrypted at rest. A file is visible only to its uploader and active users they explicitly select; document search follows the same access checks and runs locally on the Nyota server without sending document text to an external AI provider.
+
+For local development, the server creates and reuses an encryption key at `data/member-document-key`. Keep this file private and back it up with the local database; losing it makes stored documents unreadable.
+
+For production, set `DOCUMENT_STORAGE_KEY` to a securely generated 32-byte (64-character hexadecimal) secret in the deployment's secret manager. All server instances using the same database must use the same key. Do not rotate or replace it unless stored documents are re-encrypted.
+
 ## Deploy On Render
 
 This repo is now configured to deploy as a single Render Web Service (frontend + API).
@@ -50,6 +58,7 @@ Docker deployment is included via `Dockerfile` and `render.yaml` (`runtime: dock
 3. Render will pick up `render.yaml` automatically.
 4. In service environment variables, set:
    - `GEMINI_API_KEY` = your API key
+   - `DOCUMENT_STORAGE_KEY` = a securely generated 64-character hexadecimal secret
 5. Deploy.
 
 Notes:

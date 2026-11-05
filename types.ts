@@ -94,6 +94,22 @@ export interface PatientCase {
   parity: string; 
   chiefComplaint: string;
   vitals: string; 
+  region?: string;
+  raceEthnicity?: string;
+  enrollmentDate?: string;
+  pregnancyStartDate?: string;
+  deliveryDate?: string;
+  observedAt?: string;
+  sbp?: number;
+  dbp?: number;
+  hrv?: number;
+  bmi?: number;
+  aqi?: number;
+  heatIslandIndex?: number;
+  ruleScore?: number;
+  eventWithin72h?: boolean;
+  hypertension?: boolean;
+  diabetes?: boolean;
   environmentalVitalSign?: string; 
   narrative: string; 
   labs?: string; 
@@ -204,6 +220,8 @@ export interface TeamMember {
   subscriptionStatus?: 'trialing' | 'active' | 'expired' | 'canceled';
   trialEndsAt?: string | null;
   trialDaysRemaining?: number | null;
+  dashboardAccess?: PillarType | null;
+  communityCareAccess?: boolean;
 }
 
 export interface UserPermissions {

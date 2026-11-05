@@ -31,6 +31,7 @@ import MCOPortal from './components/MCOPortal';
 import { PatientCase, AppStatus, BoardGroup, BoardItem, TeamMember, PillarType, UserSession, UserPermissions } from './types';
 import { analyzeCase } from './services/gemini';
 import { dashboardTheme } from './utils/dashboardTheme';
+import { getAllowedPillars } from './utils/pillarAccess';
 
 const MOCK_TEAM: TeamMember[] = [
   { 
@@ -130,6 +131,26 @@ function AppInner() {
 
   const allMembers = useMemo(() => boardGroups.flatMap(g => g.items), [boardGroups]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const allowedPillars = getAllowedPillars({
+      ...currentSession.user,
+      accessLevel: currentSession.accessLevel,
+    });
+    if (!allowedPillars.includes(activePillar)) {
+      const nextPillar = allowedPillars[0] || 'mco';
+      setActivePillar(nextPillar);
+      setCurrentView(nextPillar === 'clinical' ? 'clinical-diagnostics' : nextPillar === 'community' ? 'support' : 'dashboard');
+    }
+  }, [
+    activePillar,
+    currentSession.accessLevel,
+    currentSession.user.communityCareAccess,
+    currentSession.user.dashboardAccess,
+    currentSession.user.role,
+    isAuthenticated,
+  ]);
+
   // load data from CSV-backed API on mount — all hooks must be before early returns
   const refreshBoardData = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -181,6 +202,11 @@ function AppInner() {
 
   // Pillar Change Logic
   const handlePillarChange = (pillar: PillarType) => {
+    const allowedPillars = getAllowedPillars({
+      ...currentSession.user,
+      accessLevel: currentSession.accessLevel,
+    });
+    if (!allowedPillars.includes(pillar)) return;
     setActivePillar(pillar);
     // Set sensible defaults for the pillar
     if (pillar === 'mco') setCurrentView('dashboard');
@@ -267,7 +293,7 @@ function AppInner() {
       case 'support': return <ContinuousSupportView selectedMember={searchedMember} />;
       case 'birthplan': return <BirthPlanPerspectiveView selectedMember={searchedMember} />;
       case 'hedis': return <HEDISReportingView />;
-      case 'careforce': return <CareForceView onViewChange={setCurrentView} />;
+      case 'careforce': return <CareForceView showSeatUpsell={activePillar === 'mco'} />;
       case 'stratification': return <PopulationRiskView />;
       case 'environment-sdoh': return <EnvironmentalSDOHView />;
       case 'roi': return <ProgrammaticROIView />;
@@ -291,7 +317,7 @@ function AppInner() {
       case 'admin-dashboard': return <AdminDashboard currentSession={currentSession} />;
       case 'user-management': return <UserManagementView team={MOCK_TEAM} currentSession={currentSession} />;
       case 'supervisor-dashboard': return <SupervisorDashboard currentSession={currentSession} boardGroups={boardGroups} />;
-      case 'mco-portal': return <MCOPortal onViewChange={setCurrentView} onDataChanged={refreshBoardData} />;
+      case 'mco-portal': return <MCOPortal onViewChange={setCurrentView} />;
       case 'board':
       default:
         if (boardGroups.length === 0) {
