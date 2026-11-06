@@ -46,16 +46,22 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
-      return callback(null, true);
-    }
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Origin not allowed'));
-  },
-}));
+app.use((req, res, next) => {
+  const protocol = req.get('x-forwarded-proto')?.split(',')[0].trim() || req.protocol;
+  const host = req.get('x-forwarded-host')?.split(',')[0].trim() || req.get('host');
+  const requestOrigin = `${protocol}://${host}`;
+
+  return cors({
+    origin(origin, callback) {
+      if (!origin || origin === requestOrigin) return callback(null, true);
+      if (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Origin not allowed'));
+    },
+  })(req, res, next);
+});
 
 app.use(express.json({ limit: '1mb' }));
 
